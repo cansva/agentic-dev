@@ -4,16 +4,9 @@ A [Claude Code plugin](https://code.claude.com/docs/en/plugins) that runs a full
 
 ## Install
 
-**Local development:**
-
 ```bash
-claude --plugin-dir /path/to/agentic-dev
-```
-
-**Install from GitHub:**
-
-```bash
-claude plugin install github:q5vqbfhqnm-alt/agentic-dev
+claude plugins marketplace add q5vqbfhqnm-alt/agentic-dev
+claude plugins install agentic-dev@agentic-dev
 ```
 
 ## Prerequisites

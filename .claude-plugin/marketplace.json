@@ -1,0 +1,17 @@
+{
+  "name": "agentic-dev",
+  "owner": {
+    "name": "q5vqbfhqnm-alt"
+  },
+  "metadata": {
+    "description": "Agentic dev workflow plugin: spec → build → test → ship → review → merge with independent Codex review gate."
+  },
+  "plugins": [
+    {
+      "name": "agentic-dev",
+      "source": "./plugins/agentic-dev",
+      "description": "Agentic dev workflow: 3 agents (dev, spec, review) + 3 skills (build, test, ship) + Codex review gate",
+      "version": "1.0.0"
+    }
+  ]
+}
