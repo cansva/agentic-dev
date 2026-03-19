@@ -15,8 +15,8 @@ Everything from pre-push checks through PR creation and verification.
 1. **Prepare the dev server:**
    ```bash
    lsof -ti:3000 | xargs kill -9 2>/dev/null || true
-   npm install
-   npm run dev &
+   eval "$AGENTIC_DEV_INSTALL_CMD"
+   eval "$AGENTIC_DEV_DEV_CMD" &
    DEV_PID=$!
    ```
    Wait for the "Ready" message before continuing.
@@ -58,7 +58,7 @@ The PR will be squash-merged, so keep it to one clean commit.
 
 ## Opening the PR
 
-Open PR against `preview`. If the repo has a PR template
+Open PR against `$AGENTIC_DEV_BASE_BRANCH` (default: `preview`). If the repo has a PR template
 (`$AGENTIC_DEV_PR_TEMPLATE`, defaults to `.github/pull_request_template.md`),
 GitHub will pre-fill from it.
 
@@ -96,7 +96,7 @@ the checklist. Other sections can be "N/A" or omitted.
 - [ ] PR description fully filled (no placeholder text remaining)
 - [ ] `Closes #[issue]` in PR description
 - [ ] If AC changed: Issue updated + "AC updated" in PR
-- [ ] Branch is from `preview`, not `main`
+- [ ] Branch is from `$AGENTIC_DEV_BASE_BRANCH`, not `main`
 
 ### Trivial path
 
@@ -105,4 +105,4 @@ the checklist. Other sections can be "N/A" or omitted.
 - [ ] No lint or type errors
 - [ ] E2E tests updated if existing tests cover changed flows
 - [ ] PR description has What changed + checklist filled
-- [ ] Branch is from `preview`, not `main`
+- [ ] Branch is from `$AGENTIC_DEV_BASE_BRANCH`, not `main`

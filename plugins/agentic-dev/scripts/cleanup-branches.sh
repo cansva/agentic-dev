@@ -5,9 +5,24 @@ set -euo pipefail
 # Safe: skips branches with unpushed commits, open PRs, or uncommitted worktree changes.
 # Called automatically at the start of each /dev session.
 #
-# Usage: ./scripts/cleanup-branches.sh
+# Usage: ./scripts/cleanup-branches.sh [--local-only]
+#
+# --local-only  Only clean local branches and worktrees. Never touch remote refs.
+#               Used by the dev agent on automatic startup cleanup.
 
-PROTECTED="main|preview"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+source "$SCRIPT_DIR/config.sh"
+
+if [ "${AGENTIC_DEV_SKIP_CLEANUP:-}" = "1" ]; then
+  exit 0
+fi
+
+LOCAL_ONLY=false
+for arg in "$@"; do
+  [ "$arg" = "--local-only" ] && LOCAL_ONLY=true
+done
+
+PROTECTED="$AGENTIC_DEV_PROTECTED_BRANCHES"
 
 echo "=== Branch & Worktree Cleanup ==="
 
@@ -53,8 +68,8 @@ for branch in $(git branch --format='%(refname:short)' | grep -vE "^($PROTECTED)
   remote_exists=$(git rev-parse --verify "refs/remotes/origin/$branch" 2>/dev/null && echo "yes" || echo "no")
 
   if [ "$remote_exists" = "no" ]; then
-    # Remote is gone — check for unpushed commits against preview
-    unpushed=$(git log "origin/preview..$branch" --oneline 2>/dev/null || true)
+    # Remote is gone — check for unpushed commits against base branch
+    unpushed=$(git log "origin/${AGENTIC_DEV_BASE_BRANCH}..$branch" --oneline 2>/dev/null || true)
     if [ -z "$unpushed" ]; then
       echo "  Deleting branch: $branch (remote gone, no unpushed commits)"
       git branch -d "$branch" 2>/dev/null || true
@@ -63,7 +78,7 @@ for branch in $(git branch --format='%(refname:short)' | grep -vE "^($PROTECTED)
       all_merged=true
       while IFS= read -r sha_line; do
         sha=$(echo "$sha_line" | awk '{print $1}')
-        if ! git merge-base --is-ancestor "$sha" origin/preview 2>/dev/null; then
+        if ! git merge-base --is-ancestor "$sha" "origin/${AGENTIC_DEV_BASE_BRANCH}" 2>/dev/null; then
           all_merged=false
           break
         fi
@@ -88,23 +103,28 @@ for branch in $(git branch --format='%(refname:short)' | grep -vE "^($PROTECTED)
 done
 
 # 5. Delete stale remote branches (merged PRs that GitHub didn't clean up)
-for remote_branch in $(git branch -r --format='%(refname:short)' | grep -v HEAD | sed 's|^origin/||' | grep -vE "^($PROTECTED)$"); do
-  # Check if there's an open PR for this branch
-  open_pr=$(gh pr list --head "$remote_branch" --state open --json number --jq 'length' 2>/dev/null || echo "1")
-  if [ "$open_pr" = "0" ]; then
-    # No open PR — check if merged
-    merged_pr=$(gh pr list --head "$remote_branch" --state merged --json number --jq 'length' 2>/dev/null || echo "0")
-    if [ "$merged_pr" != "0" ]; then
-      echo "  Deleting remote branch: origin/$remote_branch (PR merged)"
-      git push origin --delete "$remote_branch" 2>/dev/null || true
-    else
-      # No PR at all — check if branch is fully merged into preview
-      if git merge-base --is-ancestor "origin/$remote_branch" origin/preview 2>/dev/null; then
-        echo "  Deleting remote branch: origin/$remote_branch (fully merged, no PR)"
+#    Skipped in --local-only mode to avoid destructive remote operations.
+if [ "$LOCAL_ONLY" = true ]; then
+  echo "  Skipping remote branch cleanup (--local-only)"
+else
+  for remote_branch in $(git branch -r --format='%(refname:short)' | grep -v HEAD | sed 's|^origin/||' | grep -vE "^($PROTECTED)$"); do
+    # Check if there's an open PR for this branch
+    open_pr=$(gh pr list --head "$remote_branch" --state open --json number --jq 'length' 2>/dev/null || echo "1")
+    if [ "$open_pr" = "0" ]; then
+      # No open PR — check if merged
+      merged_pr=$(gh pr list --head "$remote_branch" --state merged --json number --jq 'length' 2>/dev/null || echo "0")
+      if [ "$merged_pr" != "0" ]; then
+        echo "  Deleting remote branch: origin/$remote_branch (PR merged)"
         git push origin --delete "$remote_branch" 2>/dev/null || true
+      else
+        # No PR at all — check if branch is fully merged into base branch
+        if git merge-base --is-ancestor "origin/$remote_branch" "origin/${AGENTIC_DEV_BASE_BRANCH}" 2>/dev/null; then
+          echo "  Deleting remote branch: origin/$remote_branch (fully merged, no PR)"
+          git push origin --delete "$remote_branch" 2>/dev/null || true
+        fi
       fi
     fi
-  fi
-done
+  done
+fi
 
 echo "=== Cleanup complete ==="

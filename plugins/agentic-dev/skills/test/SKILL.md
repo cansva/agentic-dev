@@ -13,7 +13,7 @@ Testing guidelines for the dev agent.
 - If you rerun CI more than once to get green, quarantine the test
   immediately — rerunning is a signal, not a solution.
 - Quarantine: add `@quarantine` tag + open a GitHub Issue.
-- Never merge to preview with a flaky unquarantined smoke test.
+- Never merge to `$AGENTIC_DEV_BASE_BRANCH` with a flaky unquarantined smoke test.
 
 ## Test data strategy
 

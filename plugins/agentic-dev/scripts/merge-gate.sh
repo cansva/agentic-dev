@@ -9,6 +9,9 @@ set -euo pipefail
 #
 # Usage:  ./scripts/merge-gate.sh <PR_NUMBER>
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+source "$SCRIPT_DIR/config.sh"
+
 PR_NUMBER="${1:?Usage: merge-gate.sh <PR_NUMBER>}"
 REPO=$(gh repo view --json nameWithOwner --jq '.nameWithOwner')
 
@@ -26,7 +29,7 @@ MERGEABLE=$(echo "$PR_DATA" | jq -r '.mergeable')
 # Determine if full E2E is needed based on which files the PR touches.
 # Set AGENTIC_DEV_E2E_PATHS to a grep -E regex matching E2E-sensitive paths
 # in your project. Defaults to common patterns.
-E2E_PATHS="${AGENTIC_DEV_E2E_PATHS:-^(app/api/|app/lib/|src/api/|src/lib/|e2e/|tests/e2e/)}"
+E2E_PATHS="$AGENTIC_DEV_E2E_PATHS"
 BASE_BRANCH=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json baseRefName --jq '.baseRefName')
 CHANGED_FILES=$(git diff --name-only "origin/$BASE_BRANCH"...HEAD 2>/dev/null || true)
 E2E_REQUIRED="false"
@@ -62,7 +65,7 @@ fi
 
 # 1. CI passed (tolerates rebase-only changes since last green run)
 #    Auto-discover workflow if not set: use most recent run on this branch.
-if [ -n "$AGENTIC_DEV_CI_WORKFLOW" ]; then
+if [ -n "${AGENTIC_DEV_CI_WORKFLOW}" ]; then
   CI_WORKFLOW="$AGENTIC_DEV_CI_WORKFLOW"
 else
   CI_WORKFLOW=$(gh run list --branch "$BRANCH" --repo "$REPO" -L 1 --json workflowName --jq '.[0].workflowName // empty' 2>/dev/null || true)
@@ -81,7 +84,7 @@ else
     FAILED=1
   else
     # Check if any source files changed between the green run and current HEAD.
-    CI_PATHS="${AGENTIC_DEV_CI_PATHS:-src/ app/ e2e/ package.json tsconfig.json}"
+    CI_PATHS="$AGENTIC_DEV_CI_PATHS"
     CODE_DIFF=$(git diff "$CI_SHA"...HEAD -- $CI_PATHS 2>/dev/null || echo "changed")
     if [ -z "$CODE_DIFF" ]; then
       echo "1. CI passed (no source changes since green run)"
@@ -95,7 +98,7 @@ fi
 # 2. Full E2E verified (if diff touches E2E-sensitive paths)
 #    The E2E command is project-specific. Set AGENTIC_DEV_E2E_CMD in the
 #    consuming repo's environment.
-E2E_CMD="${AGENTIC_DEV_E2E_CMD:-npm run test:e2e}"
+E2E_CMD="$AGENTIC_DEV_E2E_CMD"
 if [ "$E2E_REQUIRED" = "true" ]; then
   echo "2. Diff touches E2E-sensitive paths — running full E2E locally..."
   if eval "$E2E_CMD"; then

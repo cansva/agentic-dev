@@ -5,16 +5,19 @@ set -euo pipefail
 #
 # Usage:  scripts/pre-push-checks.sh
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+source "$SCRIPT_DIR/config.sh"
+
 echo "=== Pre-push checks ==="
 
 echo "1/3 Running tests..."
-npm test
+eval "$AGENTIC_DEV_TEST_CMD"
 
 echo "2/3 Running lint & type-check..."
-npm run lint
+eval "$AGENTIC_DEV_LINT_CMD"
 
 echo "3/3 Running production build..."
-npm run build
+eval "$AGENTIC_DEV_BUILD_CMD"
 
 echo ""
 echo "=== All pre-push checks passed ==="

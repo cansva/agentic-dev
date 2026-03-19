@@ -155,8 +155,8 @@ Before merge gate, check if rebase is needed:
 
 ```bash
 REVIEWED_SHA=$(git rev-parse HEAD)
-git fetch origin preview
-git rebase origin/preview
+git fetch origin "$AGENTIC_DEV_BASE_BRANCH"
+git rebase "origin/$AGENTIC_DEV_BASE_BRANCH"
 DIFF=$(git diff "$REVIEWED_SHA" HEAD)
 ```
 
@@ -184,4 +184,8 @@ Return to the dev agent:
 - `VERDICT`: approved / blocked
 - `CI_STATUS`: green / failed / unknown
 - `MERGE_RESULT`: success / failure / not-attempted
-- Summary of any findings or errors
+- `CODEX_SESSION_ID`: the session ID for re-review continuation
+- Structured findings (if blocked):
+  - For each finding: file path, line number(s), severity, and the specific issue
+  - Quote the relevant code so the dev agent can fix without re-reading
+  - Order by severity (blockers first)

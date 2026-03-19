@@ -42,7 +42,7 @@ Implementation guidelines for the dev agent. Follow these when writing code.
 - Follow existing patterns in the codebase. If you think a different
   approach is better, note it in the PR description but implement the
   existing pattern unless told otherwise
-- Branch from `preview` by default.
+- Branch from `$AGENTIC_DEV_BASE_BRANCH` (default: `preview`) by default.
   Exception: hotfix branches branch from `main`.
   Branch name: `[feature|fix|refactor]/[short-name]` or `hotfix/[short-name]`
 

@@ -1,12 +1,16 @@
 #!/bin/bash
 # Hook: blocks branch creation from wrong base.
 #
-# The dev workflow requires branching from `preview` (or `main` for hotfix).
+# The dev workflow requires branching from the base branch (or `main` for hotfix).
 # Branching from any other base silently creates merge problems that surface
 # late in the cycle (rebase check or merge conflicts).
 #
 # PreToolUse hook — receives JSON on stdin.
 # Exit 0 = allow, exit 2 = block.
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PLUGIN_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+source "$PLUGIN_ROOT/scripts/config.sh"
 
 INPUT=$(cat)
 COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command // empty')
@@ -15,7 +19,7 @@ if [ -z "$COMMAND" ]; then
   exit 0
 fi
 
-ALLOWED_BASES="preview|main|origin/preview|origin/main"
+ALLOWED_BASES="${AGENTIC_DEV_BASE_BRANCH}|main|origin/${AGENTIC_DEV_BASE_BRANCH}|origin/main"
 
 # git checkout -b <name> [base]  →  base is word 5 (if present)
 # git switch -c <name> [base]    →  base is word 5 (if present)
@@ -31,7 +35,7 @@ if echo "$COMMAND" | grep -qE 'git\s+(checkout\s+-b|switch\s+-c)\s+'; then
   fi
 
   if ! echo "$BASE" | grep -qE "^($ALLOWED_BASES)$"; then
-    echo "BLOCKED: Branch must be created from 'preview' (or 'main' for hotfix). Got base: $BASE" >&2
+    echo "BLOCKED: Branch must be created from '${AGENTIC_DEV_BASE_BRANCH}' (or 'main' for hotfix). Got base: $BASE" >&2
     exit 2
   fi
   exit 0
@@ -60,7 +64,7 @@ if echo "$COMMAND" | grep -qE 'git\s+worktree\s+add\s+'; then
   fi
 
   if ! echo "$BASE" | grep -qE "^($ALLOWED_BASES)$"; then
-    echo "BLOCKED: Worktree branch must be created from 'preview' (or 'main' for hotfix). Got base: $BASE" >&2
+    echo "BLOCKED: Worktree branch must be created from '${AGENTIC_DEV_BASE_BRANCH}' (or 'main' for hotfix). Got base: $BASE" >&2
     exit 2
   fi
   exit 0

@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.1.0 — 2026-03-20
+
+Configurable setup.
+
+- Added: `init.sh` setup checker — verifies prerequisites, detects build system, scaffolds GitHub templates
+- Added: `config.sh` — base branch, build commands, and paths are now configurable via environment variables
+- Changed: Non-npm projects supported out of the box (Make, Cargo, Go, Python)
+- Changed: Branch cleanup is automatic and local-only on startup
+- Changed: Tighter trivial triage and review fix loops
+- Fixed: Agent routing uses intent matching instead of slash-command syntax
+
 ## 0.1.0 — 2026-03-20
 
 Initial release.

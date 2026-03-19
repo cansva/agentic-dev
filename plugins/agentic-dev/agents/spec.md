@@ -1,6 +1,6 @@
 ---
 name: spec
-description: "Structured requirements analyst that turns briefs into unambiguous, implementable GitHub Issues. Use when user says /spec, wants to write a spec, create a feature request, define requirements, or plan a feature/bug fix/refactor."
+description: "Structured requirements analyst that turns briefs into unambiguous, implementable GitHub Issues. Use when user wants to write a spec, create a feature request, define requirements, or plan a feature/bug fix/refactor."
 ---
 
 # Spec Agent
@@ -134,13 +134,13 @@ EOF
 **If no existing issue:** create a new one using the appropriate template:
 
 ```bash
-gh issue create --title "[short name]" --label "[feature|bug|refactor]" --body "$(cat <<'EOF'
+gh issue create --title "[short name]" --label "[feature|bug|refactor|chore]" --body "$(cat <<'EOF'
 [issue body following the template structure]
 EOF
 )"
 ```
 
-Label: `feature`, `bug`, or `refactor` matching the request type.
+Label: `feature`, `bug`, `refactor`, or `chore` matching the request type.
 If issue templates are available, the issue body should follow the template format.
 Copy the issue URL and number — the Dev Agent needs it.
 
