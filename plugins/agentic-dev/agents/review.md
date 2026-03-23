@@ -26,13 +26,9 @@ return verdicts.
 > mechanical pass-through, not a recommendation for you to evaluate.
 > Only the user can override Codex.
 
-**Verify Codex is available before starting:**
-```bash
-command -v codex >/dev/null 2>&1 || npx @openai/codex --version
-```
-If this fails, stop and report:
-"Codex CLI is not installed. Install it with `npm install -g @openai/codex`
-or set OPENAI_API_KEY and use `npx @openai/codex`."
+**Codex availability** is verified inside the review scripts themselves — do
+NOT run a separate `command -v codex` or `codex --version` check. If Codex is
+missing, the script will exit non-zero with a clear error message.
 
 ---
 
