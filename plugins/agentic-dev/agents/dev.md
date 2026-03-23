@@ -37,10 +37,11 @@ If any script is missing, stop and tell the user before continuing.
 **Verify prerequisites are installed:**
 ```bash
 command -v gh >/dev/null 2>&1 || { echo "Missing prerequisite: gh CLI (https://cli.github.com)"; exit 1; }
-command -v codex >/dev/null 2>&1 || npx @openai/codex --version >/dev/null 2>&1 || { echo "Missing prerequisite: Codex CLI (npm install -g @openai/codex)"; exit 1; }
 ```
 
-If either is missing, stop and tell the user before continuing.
+Codex availability is verified inside the review scripts — do not check it here.
+
+If `gh` is missing, stop and tell the user before continuing.
 
 **Prune stale local branches silently:**
 ```bash
@@ -100,16 +101,38 @@ Store the result as `SESSION_PATH` (`trivial` or `full`) for the rest of this se
 
 ---
 
-## First question (ask after triage passes)
+## Localhost detection (auto, after triage passes)
 
-Ask the user:
+Do NOT ask the user whether to test on localhost. Detect it from the changed files.
 
-> **Will you test on localhost before I push?**
+**Run after implementation, before the ship phase:**
 
-Options: `["Yes — include localhost gate", "No — skip to automated checks"]`
+Check which files were changed on this branch vs `$AGENTIC_DEV_BASE_BRANCH`:
+```bash
+git diff --name-only "origin/$AGENTIC_DEV_BASE_BRANCH"...HEAD
+```
 
-- First option → `LOCALHOST_MODE = yes`
-- Second option → `LOCALHOST_MODE = no`
+**Auto-enable `LOCALHOST_MODE = yes` if ANY changed file matches:**
+- UI components, pages, or layouts (`.tsx`, `.jsx` files under `app/`, `src/`, `pages/`, `components/`)
+- Styling files (`.css`, `.scss`, `.module.css`, `.module.scss`)
+- New or modified routes (`app/**/page.tsx`, `pages/**/*.tsx`)
+- Static assets referenced in UI (`public/`)
+
+**Auto-set `LOCALHOST_MODE = no` (skip) if ALL changes are:**
+- API-only (`app/api/`, `src/api/`, `lib/`, `utils/` with no UI imports)
+- Config / env changes (`.env*`, `*.config.*`, `tsconfig.json`)
+- Refactors with no visible change (rename, move, type-only changes)
+- Test-only changes (`__tests__/`, `*.test.*`, `*.spec.*`, `e2e/`)
+- Documentation (`.md`)
+- Scripts or CI (`.sh`, `.github/`)
+
+**Tell the user your decision:**
+> `LOCALHOST_MODE = yes` — UI files changed: `[list of matching files]`
+
+or:
+> `LOCALHOST_MODE = no` — no UI-affecting changes detected.
+
+The user can override in either direction.
 
 ---
 
@@ -169,9 +192,23 @@ A cycle increments on each push (not each delegation). Track cycles with
 a counter starting at 0. After 3 cycles, stop and escalate to the user.
 
 If the review agent returns findings that need fixes:
-1. Read the findings summary — it contains file paths, line numbers, and
-   the specific issue for each finding
-2. Fix the code in this context (you have the build/test/ship skills loaded)
+
+1. **Classify each blocker** before acting:
+
+   | Type | Examples | Action |
+   |------|----------|--------|
+   | **Objective** | Unused import, type error, missing null check, undeclared variable, broken import path | Auto-fix without asking |
+   | **Subjective / conflicts with session** | Architecture preference, naming choice, pattern disagreement, something explicitly discussed or agreed during localhost review | **STOP** — present to user with context |
+
+   For subjective blockers, show:
+   > Codex flagged: `[blocker summary]`
+   > During this session we agreed: `[relevant context or decision]`
+   > Should I apply this fix or dismiss it?
+
+   Only the user can dismiss a Codex blocker.
+
+2. Fix the approved/objective blockers in this context (you have the
+   build/test/ship skills loaded)
 3. Run pre-push checks and push the fix (this increments the cycle counter)
 4. Re-delegate to the review agent with the same `CODEX_SESSION_ID`
 

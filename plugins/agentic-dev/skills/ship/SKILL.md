@@ -12,33 +12,53 @@ Everything from pre-push checks through PR creation and verification.
 
 ### If LOCALHOST_MODE = yes
 
-1. **Prepare the dev server:**
+1. **Start the dev server inside the worktree:**
+
+   The dev server MUST run from the worktree directory, not the main repo
+   (which may already be serving another branch). Use a different port to
+   avoid conflicts.
+
    ```bash
-   lsof -ti:3000 | xargs kill -9 2>/dev/null || true
+   WORKTREE_DIR=$(pwd)
+   # Pick a port that won't collide with the main dev server on :3000
+   DEV_PORT="${AGENTIC_DEV_DEV_PORT:-3001}"
+   lsof -ti:"$DEV_PORT" | xargs kill -9 2>/dev/null || true
    eval "$AGENTIC_DEV_INSTALL_CMD"
-   eval "$AGENTIC_DEV_DEV_CMD" &
+   PORT=$DEV_PORT eval "$AGENTIC_DEV_DEV_CMD" &
    DEV_PID=$!
    ```
    Wait for the "Ready" message before continuing.
 
 2. **Present links to the user** — based on which files/routes changed,
-   give a checklist with exact localhost URLs:
+   give a checklist with exact localhost URLs. Always show the port and
+   worktree path so the user knows which instance they're checking:
 
-   > Dev server is running. Please verify:
+   > Dev server running from worktree `$WORKTREE_DIR` on port `$DEV_PORT`.
+   > Please verify:
    >
-   > - [ ] **Main flow** — http://localhost:3000/
-   > - [ ] **Changed page** — http://localhost:3000/[route]
+   > - [ ] **Main flow** — http://localhost:$DEV_PORT/
+   > - [ ] **Changed page** — http://localhost:$DEV_PORT/[route]
    > - [ ] Bug no longer reproduces (if bug fix)
    > - [ ] Nothing visually broken on affected pages
    >
-   > Reply **ok** when done, or describe what's wrong.
+   > Reply **ok** when done, or describe what needs to change.
 
    Map every changed route/page to its localhost URL.
    **Stop and wait for the user to confirm** before continuing.
    If the user reports an issue, fix it and re-present the checklist.
 
-3. **Stop the dev server** — `kill $DEV_PID 2>/dev/null || true`
-4. **Run automated checks:** `bash "${CLAUDE_PLUGIN_ROOT}/scripts/pre-push-checks.sh"`
+3. **Sync spec if scope changed** — if the user requested changes during
+   localhost review that alter acceptance criteria or scope:
+   - Update the GitHub Issue to reflect what was actually built:
+     ```bash
+     gh issue edit [number] --body "[updated body with revised ACs]"
+     ```
+   - Note "AC updated during localhost review" in the PR description.
+   - Skip this step if the changes were purely cosmetic (padding, color,
+     copy tweaks) and did not alter ACs.
+
+4. **Stop the dev server** — `kill $DEV_PID 2>/dev/null || true`
+5. **Run automated checks:** `bash "${CLAUDE_PLUGIN_ROOT}/scripts/pre-push-checks.sh"`
 
 ### If LOCALHOST_MODE = no
 
