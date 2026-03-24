@@ -185,7 +185,9 @@ resolve_mergeability() {
   echo "$status"
 }
 
+PRE_REBASE_SHA=$(git rev-parse HEAD 2>/dev/null || true)
 MERGEABLE=$(resolve_mergeability "$MERGEABLE")
+POST_REBASE_SHA=$(git rev-parse HEAD 2>/dev/null || true)
 
 if [ "$MERGEABLE" = "MERGEABLE" ]; then
   echo "3. PR is mergeable"
@@ -195,6 +197,37 @@ elif [ "$MERGEABLE" = "UNKNOWN" ]; then
 else
   echo "3. PR is not mergeable (status: $MERGEABLE)"
   FAILED=1
+fi
+
+# 3b. If rebase changed HEAD, CI validated a commit that no longer exists.
+#     Re-check that CI has passed on the new HEAD before allowing merge.
+if [ "$PRE_REBASE_SHA" != "$POST_REBASE_SHA" ] && [ -n "$CI_WORKFLOW" ]; then
+  echo "3b. Rebase changed HEAD ($PRE_REBASE_SHA → $POST_REBASE_SHA) — re-validating CI..."
+  # Wait for CI to start on the new SHA (GitHub needs time after force-push)
+  sleep 10
+  NEW_CI_SHA=""
+  REBASE_POLL_MAX=60  # 60 × 10s = 10 min
+  for i in $(seq 1 $REBASE_POLL_MAX); do
+    NEW_CI_RUN=$(gh run list --branch "$BRANCH" \
+      --workflow "$CI_WORKFLOW" --repo "$REPO" --json headSha,conclusion \
+      --jq "[.[] | select(.headSha==\"$POST_REBASE_SHA\")][0] // empty" 2>/dev/null || true)
+    NEW_CI_CONCLUSION=$(echo "$NEW_CI_RUN" | jq -r '.conclusion // empty' 2>/dev/null || true)
+    if [ "$NEW_CI_CONCLUSION" = "success" ]; then
+      NEW_CI_SHA="$POST_REBASE_SHA"
+      break
+    elif [ -n "$NEW_CI_CONCLUSION" ] && [ "$NEW_CI_CONCLUSION" != "null" ]; then
+      # CI ran but didn't succeed
+      echo "3b. CI on rebased commit concluded: $NEW_CI_CONCLUSION"
+      break
+    fi
+    sleep 10
+  done
+  if [ "$NEW_CI_SHA" = "$POST_REBASE_SHA" ]; then
+    echo "3b. CI passed on rebased commit"
+  else
+    echo "3b. CI has not passed on rebased commit — cannot merge"
+    FAILED=1
+  fi
 fi
 
 # 4. PR description has no placeholders
