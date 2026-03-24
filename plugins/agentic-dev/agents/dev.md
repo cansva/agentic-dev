@@ -30,10 +30,12 @@ git fetch origin "$AGENTIC_DEV_BASE_BRANCH"
 Use a worktree with a short name (e.g. `feature-admin-export`).
 **Branch from `origin/$AGENTIC_DEV_BASE_BRANCH`** (default: `origin/preview`), **never `main`** (unless hotfix — see build skill constraints).
 
-**Symlink `.env.local`** into the worktree if it doesn't exist:
+**Symlink env files** into the worktree (worktrees don't inherit untracked files):
 ```bash
 MAIN_REPO=$(git worktree list --porcelain | head -1 | sed 's/^worktree //')
-[ -f .env.local ] || ln -s "$MAIN_REPO/.env.local" .env.local
+for f in .env .env.local .env.development.local .env.test.local; do
+  [ -f "$MAIN_REPO/$f" ] && [ ! -f "$f" ] && ln -s "$MAIN_REPO/$f" "$f"
+done
 ```
 
 ---
