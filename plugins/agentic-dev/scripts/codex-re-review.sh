@@ -31,8 +31,9 @@ REPO=$(gh repo view --json nameWithOwner --jq '.nameWithOwner')
 
 # Verify we're on the PR branch
 CURRENT_BRANCH=$(git branch --show-current)
-HEAD_BRANCH=$(gh pr view "$PR_NUMBER" --json headRefName --jq '.headRefName')
-BASE_BRANCH=$(gh pr view "$PR_NUMBER" --json baseRefName --jq '.baseRefName')
+PR_DATA=$(gh pr view "$PR_NUMBER" --json headRefName,baseRefName)
+HEAD_BRANCH=$(echo "$PR_DATA" | jq -r '.headRefName')
+BASE_BRANCH=$(echo "$PR_DATA" | jq -r '.baseRefName')
 
 if [ "$CURRENT_BRANCH" != "$HEAD_BRANCH" ]; then
   echo "ERROR: Current branch ($CURRENT_BRANCH) does not match PR branch ($HEAD_BRANCH)"
@@ -164,4 +165,3 @@ printf '%s' "$REVIEW_BODY" > "$COMMENT_FILE"
 gh pr comment "$PR_NUMBER" --body-file "$COMMENT_FILE"
 echo ""
 echo "Codex verdict: $VERDICT_LINE"
-

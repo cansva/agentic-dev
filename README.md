@@ -17,7 +17,7 @@ After installing, run the setup checker from your project root:
 bash plugins/agentic-dev/scripts/init.sh
 ```
 
-This verifies prerequisites, auto-detects your build system, checks the base branch, and prints a resolved configuration summary. If GitHub issue or PR templates are missing, it copies starter templates into `.github/` — review and commit them. Fix any failures before using the dev agent.
+This verifies prerequisites, auto-detects your build system, checks the base branch, and prints a resolved configuration summary. If GitHub issue or PR templates are missing, it copies starter templates into `.github/` — review and commit them. Fix any failures before using the workflow.
 
 ## Prerequisites
 
@@ -39,6 +39,7 @@ The plugin assumes your project has these in place. All are configurable:
 | Lint command | `npm run lint` | `AGENTIC_DEV_LINT_CMD` |
 | Build command | `npm run build` | `AGENTIC_DEV_BUILD_CMD` |
 | CI workflow | Auto-discovered | `AGENTIC_DEV_CI_WORKFLOW` |
+| CHANGELOG path | Auto-detected (`docs/CHANGELOG.md` or `CHANGELOG.md`) | `AGENTIC_DEV_CHANGELOG_PATH` |
 | PR template | `.github/pull_request_template.md` | `AGENTIC_DEV_PR_TEMPLATE` |
 | Issue templates | `.github/ISSUE_TEMPLATE/` | `AGENTIC_DEV_ISSUE_TEMPLATES` |
 | ADR file | Not set (skipped) | `AGENTIC_DEV_ADR_PATH` |
@@ -47,7 +48,7 @@ The plugin assumes your project has these in place. All are configurable:
 
 ## Usage
 
-The plugin sets `dev` as the default agent. Start a session with:
+The plugin sets `orchestrator` as the default agent. Start a session with:
 
 ```
 implement #42          # full path — implement issue #42
@@ -58,7 +59,7 @@ write a spec for ...   # create a spec issue from a brief
 ### How it works
 
 ```
-dev agent → triage (trivial or full?)
+orchestrator agent → triage (trivial or full?)
   │
   ├─ trivial: user description is the spec
   ├─ full: requires a GitHub Issue (run spec agent first)
@@ -72,7 +73,7 @@ review agent (isolated, no Write/Edit tools)
   ↓
 blocked? → dev fixes → push → re-review (max 3 cycles)
   ↓
-approved → rebase check → merge gate → squash-merge
+approved → merge gate (CI + rebase + E2E) → squash-merge
 ```
 
 ### Trivial vs full path
@@ -90,7 +91,8 @@ You can override: say "use full path" or "this is trivial" at any time.
 
 | Agent | Role |
 |-------|------|
-| `dev` | Orchestrator. Triages, sets up worktree, codes via skills, delegates review. |
+| `orchestrator` | Top-level state machine. Triages, delegates spec/dev/review, and manages fix-review loops. |
+| `dev` | Implementation agent. Works in a worktree, runs checks, and opens the PR. |
 | `spec` | Requirements analyst. Turns briefs into unambiguous GitHub Issues. |
 | `review` | CI + Codex gate. Isolated context, restricted tools, cannot self-review. |
 
@@ -129,6 +131,7 @@ All configuration is through environment variables. Defaults are defined in [`sc
 | `AGENTIC_DEV_INSTALL_CMD` | No | `npm install` | Dependency install command for localhost mode |
 | `AGENTIC_DEV_DEV_CMD` | No | `npm run dev` | Dev server command for localhost mode |
 | `AGENTIC_DEV_E2E_CMD` | No | `npm run test:e2e` | E2E test command for merge gate |
+| `AGENTIC_DEV_CHANGELOG_PATH` | No | Auto-detected (`docs/CHANGELOG.md` or `CHANGELOG.md`) | CHANGELOG file updated after merge |
 | `AGENTIC_DEV_CI_WORKFLOW` | No | Auto-discovered | GitHub Actions workflow name for CI |
 | `AGENTIC_DEV_CI_PATHS` | No | `src/ app/ e2e/ package.json tsconfig.json` | Path prefixes for CI-sensitive file detection |
 | `AGENTIC_DEV_E2E_PATHS` | No | `^(app/api/\|src/api/\|e2e/\|tests/e2e/)` | Grep regex for E2E-sensitive paths |
@@ -138,7 +141,7 @@ All configuration is through environment variables. Defaults are defined in [`sc
 
 ### Settings
 
-`settings.json` sets `dev` as the default agent when the plugin is active.
+`settings.json` sets `orchestrator` as the default agent when the plugin is active.
 
 ## The Codex guardrail
 

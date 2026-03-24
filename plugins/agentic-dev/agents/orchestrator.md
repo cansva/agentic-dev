@@ -98,7 +98,7 @@ Spawn the **dev agent** with:
 
 The dev agent implements, tests, and opens a PR. It returns:
 - `PR_NUMBER` — the opened PR
-- `CODEX_SESSION_ID` — (may be empty, set after first review)
+- `PR_URL` — the opened PR URL
 
 ---
 
