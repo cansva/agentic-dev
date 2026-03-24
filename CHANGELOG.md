@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.5.0 — 2026-03-24
+
+Build command auto-detection, leaner review prompts.
+
+### Configuration
+- Changed: Build and E2E commands are now auto-detected from `package.json` scripts instead of requiring `.claude/agentic-dev.json` in consumer repos (closes #27)
+- Added: `_detect_pkg_script` helper probes for common script names in decreasing specificity (`test:e2e:full:local` → `test:e2e:full` → `test:e2e` → `e2e`)
+- Removed: `_cfg` calls for `testCmd`, `lintCmd`, `buildCmd`, `installCmd`, `devCmd`, `e2eCmd`, `e2eSmokeCmd` — these no longer read from `.claude/agentic-dev.json`
+- Changed: Resolution order is now: env var > project config > `package.json` auto-detection > built-in default
+
+### Review system
+- Changed: Full and re-review scripts precompute linked issue numbers and inject exact issue-read commands into the Codex prompt
+- Changed: Review output format tightened — pass cases explicit, findings use compact bullet shape
+- Changed: Re-review prompt trimmed of duplicated instructions; PR body reading made optional
+
 ## 1.4.0 — 2026-03-24
 
 Reliability hardening: fail-loud guards, persistent session state, verdict validation, post-rebase CI.
