@@ -53,44 +53,43 @@ trap 'rm -f "$REVIEW_OUTPUT" "$PROMPT_FILE" "$CODEX_LOG" "$COMMENT_FILE"' EXIT
 
 # Build prompt — intentionally minimal. Two questions only.
 cat > "$PROMPT_FILE" <<PROMPT
-Review PR #${PR_NUMBER}. This is a trivial change (small scope, no logic/schema/auth impact).
+Review this pull request. It is a trivial change with small scope and no logic, schema, or auth impact.
 
-You are on the PR branch (${HEAD_BRANCH}). The base branch is ${BASE_BRANCH}.
+Answer exactly two questions:
+1. Correctness — does the diff do what the PR description says?
+2. Non-obvious breakage — could shared code, conditional rendering, CSS cascade, or import/export consumers break?
 
-Step 1: Read the diff.
-Run: git diff origin/${BASE_BRANCH}...HEAD
-
-Step 2: Read the PR description.
-Run: gh pr view ${PR_NUMBER} --json body --jq '.body'
-
-Step 3: Answer exactly two questions.
-
-### 1. Is this change correct?
-Does the diff do what the PR description says? Are there typos, off-by-one errors, wrong selectors, or incorrect logic in the change itself?
-
-### 2. Could this break something non-obvious?
-Consider: shared components, conditional rendering dependencies, CSS cascade effects, import/export changes, anything that consumers of the changed code rely on.
-
-For every non-pass finding include:
-- severity: BLOCKER | STRONG
-- file and line reference when possible
-- problem
-- exact change to make
-
-Do NOT report NICE findings. Do NOT flag style preferences or pre-existing issues.
+Rules:
+- BLOCKER and STRONG findings only.
+- Do not report NICE findings, style preferences, or pre-existing issues.
+- In any section with no findings, output exactly: pass
+- For any finding, use one bullet in this format:
+  - [SEVERITY] file:line — problem. Exact change.
 
 Output exactly in this structure:
 
 ### 1. Correctness
-[findings or pass]
+pass
 
 ### 2. Non-obvious breakage
-[findings or pass]
+pass
 
 ### Verdict
 VERDICT: approved — if zero BLOCKER and zero STRONG findings.
 VERDICT: blocked — if any BLOCKER or STRONG finding exists.
 Output exactly one of these two lines. This is the final word.
+
+Context for this review:
+- PR number: ${PR_NUMBER}
+- PR branch: ${HEAD_BRANCH}
+- Base branch: ${BASE_BRANCH}
+
+Read in this order:
+1. The diff:
+Run: git diff origin/${BASE_BRANCH}...HEAD
+
+2. The PR description:
+Run: gh pr view ${PR_NUMBER} --json body --jq '.body'
 PROMPT
 
 # Run Codex review with the focused trivial prompt

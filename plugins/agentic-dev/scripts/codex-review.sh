@@ -12,11 +12,30 @@ set -euo pipefail
 PR_NUMBER="${1:?Usage: codex-review.sh <PR_NUMBER>}"
 REPO=$(gh repo view --json nameWithOwner --jq '.nameWithOwner')
 
+discover_linked_issues() {
+  local body="$1"
+  local closing_issues bare_issues
+
+  closing_issues=$(printf '%s\n' "$body" \
+    | grep -ioE '(closes|fixes|resolves|close|fix|resolve)[[:space:]]+#[0-9]+' \
+    | grep -oE '[0-9]+' || true)
+  if [ -n "$closing_issues" ]; then
+    printf '%s\n' "$closing_issues" | awk 'NF && !seen[$0]++'
+    return
+  fi
+
+  bare_issues=$(printf '%s\n' "$body" | grep -oE '#[0-9]+' | tr -d '#' || true)
+  if [ -n "$bare_issues" ]; then
+    printf '%s\n' "$bare_issues" | awk 'NF && !seen[$0]++'
+  fi
+}
+
 # Verify we're on the PR branch, not preview/main
 CURRENT_BRANCH=$(git branch --show-current)
-PR_DATA=$(gh pr view "$PR_NUMBER" --json headRefName,baseRefName)
+PR_DATA=$(gh pr view "$PR_NUMBER" --json headRefName,baseRefName,body)
 HEAD_BRANCH=$(echo "$PR_DATA" | jq -r '.headRefName')
 BASE_BRANCH=$(echo "$PR_DATA" | jq -r '.baseRefName')
+PR_BODY_RAW=$(echo "$PR_DATA" | jq -r '.body // empty')
 
 if [ "$CURRENT_BRANCH" != "$HEAD_BRANCH" ]; then
   echo "ERROR: Current branch ($CURRENT_BRANCH) does not match PR branch ($HEAD_BRANCH)"
@@ -46,34 +65,38 @@ CODEX_LOG=$(mktemp)
 COMMENT_FILE=$(mktemp)
 trap 'rm -f "$REVIEW_OUTPUT" "$PROMPT_FILE" "$CODEX_LOG" "$COMMENT_FILE"' EXIT
 
+LINKED_ISSUES=()
+while IFS= read -r issue; do
+  [ -n "$issue" ] && LINKED_ISSUES+=("$issue")
+done < <(discover_linked_issues "$PR_BODY_RAW")
+
+if [ "${#LINKED_ISSUES[@]}" -gt 0 ]; then
+  REVIEWED_AGAINST=$(printf '#%s ' "${LINKED_ISSUES[@]}")
+  REVIEWED_AGAINST="${REVIEWED_AGAINST% }"
+  ISSUE_PROMPT_BLOCK="Linked issue(s) already discovered from the PR body: ${REVIEWED_AGAINST}
+Read each linked issue:
+$(for issue in "${LINKED_ISSUES[@]}"; do
+  printf "Run: gh issue view %s --json title,body --jq '.title, .body'\n" "$issue"
+done)"
+else
+  REVIEWED_AGAINST="none found"
+  ISSUE_PROMPT_BLOCK="No linked issue was found in the PR body. Proceed without an issue."
+fi
+
 # Build prompt in a temp file to avoid quoting issues with variable expansion
 cat > "$PROMPT_FILE" <<PROMPT
-Review PR #${PR_NUMBER} as a skeptical reviewer.
+Review this pull request as a skeptical reviewer. Do not modify files.
 
-You are on the PR branch (${HEAD_BRANCH}). The base branch is ${BASE_BRANCH}.
+Rules:
+- Findings only, not praise.
+- Ground every claim in the diff, repo code, PR metadata, or linked issues.
+- In any section with no findings, output exactly: pass
+- For any finding, use one bullet in this format:
+  - [SEVERITY] file:line — problem. Why it matters. Exact change.
+- NICE findings only if you are >=80% confident and the issue is actionable.
+- Ignore style preferences, linter-catchable issues, pre-existing issues, code with lint-ignore comments, subjective improvements, and the issue's "E2E Required" field.
 
-Step 1: Read the diff.
-Run: git diff origin/${BASE_BRANCH}...HEAD
-
-Step 2: Read the linked issue.
-Run: gh pr view ${PR_NUMBER} --json body --jq '.body'
-Scan the body for any issue reference using GitHub's closing keywords: Closes, Fixes, Resolves, close, fix, resolve (case-insensitive), followed by #N. Also look for bare #N references that appear to identify the driving issue. If multiple issues are referenced, read all of them. If none are found, proceed without an issue.
-Run: gh issue view <N> --json title,body --jq '.title, .body' (for each issue found)
-
-Step 3: Review. Do not modify any files.
-
-Review for findings, not praise. Assume the happy path works.
-For every non-pass finding include:
-- severity: BLOCKER | STRONG | NICE
-- file and line reference when possible
-- problem
-- why it matters
-- exact change to make
-
-Only report NICE findings when you are >=80% confident the issue is real and actionable.
-Do NOT flag: style preferences, linter-catchable issues, pre-existing problems not introduced by this PR, code with lint-ignore comments, subjective improvements, or the issue's "E2E Required" field (E2E execution is handled by the merge gate, not by this review).
-
-Check:
+Check all 9 areas:
 1. Spec alignment — AC met, edge cases covered, any drift from issue documented
 2. Undocumented decisions — deviations from spec or docs/ADR.md patterns that are not noted in the PR description
 3. Regression risk — shared code, call sites, adjacent flows likely affected by this change
@@ -84,47 +107,61 @@ Check:
 8. Deploy risk — config, env vars, migration safety, rollback plan if needed
 9. Observability — Sentry context on new failure paths
 
-Before finalizing, verify that all 9 items are covered and that every claim is grounded in the diff, repo code, PR metadata, or linked issue.
-
 Output exactly in this structure:
 
-Reviewed against issue #[N] or [none found].
+Reviewed against: [issue numbers reviewed, or 'none found'].
 
 ### 1. Spec alignment
-[findings or pass]
+pass
 
 ### 2. Undocumented decisions
-[findings or pass]
+pass
 
 ### 3. Regression risk
-[findings or pass]
+pass
 
 ### 4. State and UX
-[findings or pass]
+pass
 
 ### 5. Test quality
-[findings or pass]
+pass
 
 ### 6. Architectural alignment
-[findings or pass]
+pass
 
 ### 7. Security
-[findings or pass]
+pass
 
 ### 8. Deploy risk
-[findings or pass]
+pass
 
 ### 9. Observability
-[findings or pass]
+pass
 
 ### Summary
-- List all BLOCKER and STRONG findings first.
-- If none, say no blocking findings.
+- Repeat all BLOCKER and STRONG findings only.
+- If none, output exactly: - no blocking findings
 
 ### Verdict
 VERDICT: approved — if zero BLOCKER and zero STRONG findings.
 VERDICT: blocked — if any BLOCKER or STRONG finding exists.
 Output exactly one of these two lines. This is the final word.
+
+Context for this review:
+- PR number: ${PR_NUMBER}
+- PR branch: ${HEAD_BRANCH}
+- Base branch: ${BASE_BRANCH}
+- Start your response with exactly: Reviewed against: ${REVIEWED_AGAINST}.
+
+Read in this order:
+1. The diff:
+Run: git diff origin/${BASE_BRANCH}...HEAD
+
+2. The PR description:
+Run: gh pr view ${PR_NUMBER} --json body --jq '.body'
+
+3. The linked issue(s):
+${ISSUE_PROMPT_BLOCK}
 PROMPT
 
 # Run Codex review with the full 9-point prompt
