@@ -46,38 +46,8 @@ You receive from the orchestrator:
 **Start CI watch in background (if the repo has CI):**
 ```bash
 HEAD_BRANCH=$(gh pr view $PR_NUMBER --json headRefName --jq '.headRefName')
-REPO_NWO=$(gh repo view --json nameWithOwner --jq '.nameWithOwner')
-CI_WATCH_PID=""
-
-# Auto-discover CI workflow: use override, or find the most recent workflow
-# that ran on this branch, or fall back to listing all workflows.
-if [ -n "$AGENTIC_DEV_CI_WORKFLOW" ]; then
-  CI_WORKFLOW="$AGENTIC_DEV_CI_WORKFLOW"
-else
-  CI_WORKFLOW=$(gh run list --branch="$HEAD_BRANCH" -L 1 --json workflowName --jq '.[0].workflowName // empty' 2>/dev/null || true)
-  if [ -z "$CI_WORKFLOW" ]; then
-    # No runs yet — pick the first workflow in the repo
-    CI_WORKFLOW=$(gh api "repos/$REPO_NWO/actions/workflows" --jq '.workflows[0].name // empty' 2>/dev/null || true)
-  fi
-fi
-
-if [ -n "$CI_WORKFLOW" ]; then
-  RUN_ID=""
-  for i in $(seq 1 20); do
-    RUN_ID=$(gh run list --workflow="$CI_WORKFLOW" --branch="$HEAD_BRANCH" -L 1 --json databaseId --jq '.[0].databaseId // ""')
-    [ -n "$RUN_ID" ] && break
-    sleep 6
-  done
-  if [ -z "$RUN_ID" ]; then
-    echo "WARNING: CI run for '$CI_WORKFLOW' did not appear after 2 minutes."
-  else
-    gh run watch "$RUN_ID" --exit-status &
-    CI_WATCH_PID=$!
-  fi
-else
-  echo "NOTE: No CI workflow found — skipping CI watch."
-  CI_SKIPPED=true
-fi
+bash "${CLAUDE_PLUGIN_ROOT}/scripts/ci-watch.sh" "$HEAD_BRANCH" &
+CI_WATCH_PID=$!
 ```
 
 **Run Codex review immediately (do not wait for CI):**
@@ -104,14 +74,16 @@ Use the script matching `SESSION_PATH`. Store `CODEX_SESSION_ID` from output.
 ## Step 2: Check CI result
 
 ```bash
-if [ -n "$CI_WATCH_PID" ]; then
-  wait $CI_WATCH_PID 2>/dev/null
-  CI_STATUS=$(gh run view "$RUN_ID" --json conclusion --jq '.conclusion')
-elif [ "$CI_SKIPPED" = "true" ]; then
+# ci-watch.sh exits 0=pass, 1=fail, 2=no run found
+if wait $CI_WATCH_PID 2>/dev/null; then
   CI_STATUS="green"
 else
-  echo "WARNING: No CI run was tracked. Check GitHub Actions manually."
-  CI_STATUS="unknown"
+  CI_EXIT=$?
+  if [ "$CI_EXIT" -eq 2 ]; then
+    CI_STATUS="unknown"
+  else
+    CI_STATUS="failed"
+  fi
 fi
 ```
 

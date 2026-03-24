@@ -64,12 +64,8 @@ else
 fi
 
 # 1. CI passed (tolerates rebase-only changes since last green run)
-#    Auto-discover workflow if not set: use most recent run on this branch.
-if [ -n "${AGENTIC_DEV_CI_WORKFLOW}" ]; then
-  CI_WORKFLOW="$AGENTIC_DEV_CI_WORKFLOW"
-else
-  CI_WORKFLOW=$(gh run list --branch "$BRANCH" --repo "$REPO" -L 1 --json workflowName --jq '.[0].workflowName // empty' 2>/dev/null || true)
-fi
+#    Uses unified discovery from config.sh.
+CI_WORKFLOW=$(agentic_dev_discover_ci_workflow "$BRANCH" "$REPO")
 
 if [ -z "$CI_WORKFLOW" ]; then
   echo "1. No CI workflow found — skipping CI check"
@@ -207,9 +203,15 @@ fi
 
 echo "All release checks passed"
 
-# 6. Auto-generate CHANGELOG entry from PR metadata
-#    Runs only on success — never pushes a CHANGELOG commit for a failed gate.
-#    Uses [skip ci] to avoid re-triggering CI and blocking --auto merge.
+# 6. Merge first, then update CHANGELOG on the base branch.
+#    Previous approach committed CHANGELOG before merge, which raced with
+#    concurrent merge gates. Now we merge first, then commit to base.
+echo ""
+echo "Merging PR #$PR_NUMBER..."
+gh pr merge "$PR_NUMBER" --repo "$REPO" --squash --delete-branch
+
+# 7. Auto-generate CHANGELOG entry on the base branch (post-merge).
+#    Runs only after successful merge — never pushes for a failed gate.
 TODAY=$(date +%Y-%m-%d)
 
 # Extract bullet points: lines starting with "- Added/Fixed/Changed/Removed:"
@@ -228,8 +230,8 @@ fi
 CHANGELOG_ENTRY=$(printf "## %s — %s\n%s" "$TODAY" "$PR_TITLE" "$CHANGELOG_BULLETS")
 CHANGELOG_PATH="docs/CHANGELOG.md"
 
-# Get current file content and SHA from the PR branch
-EXISTING=$(gh api "repos/$REPO/contents/$CHANGELOG_PATH?ref=$BRANCH" \
+# Get current file content and SHA from the base branch (post-merge)
+EXISTING=$(gh api "repos/$REPO/contents/$CHANGELOG_PATH?ref=$BASE_BRANCH" \
   --jq '{sha: .sha, content: .content}' 2>/dev/null || echo '{}')
 FILE_SHA=$(echo "$EXISTING" | jq -r '.sha // empty')
 EXISTING_CONTENT=$(echo "$EXISTING" | jq -r '.content // empty' | base64 -d 2>/dev/null || echo "# Changelog")
@@ -242,20 +244,15 @@ NEW_CONTENT=$(printf "%s\n\n%s\n%s" "$HEADER" "$CHANGELOG_ENTRY" "$REST")
 # Base64 encode — tr -d '\n' for cross-platform safety (macOS vs GNU)
 NEW_B64=$(printf '%s' "$NEW_CONTENT" | base64 | tr -d '\n')
 
-# Commit via GitHub Contents API (no local checkout)
+# Commit via GitHub Contents API to the base branch
 COMMIT_ARGS=(-X PUT \
-  -f message="docs: auto-update CHANGELOG for PR #$PR_NUMBER" \
+  -f message="docs: auto-update CHANGELOG for PR #$PR_NUMBER [skip ci]" \
   -f content="$NEW_B64" \
-  -f branch="$BRANCH")
+  -f branch="$BASE_BRANCH")
 [ -n "$FILE_SHA" ] && COMMIT_ARGS+=(-f sha="$FILE_SHA")
 
 gh api "repos/$REPO/contents/$CHANGELOG_PATH" "${COMMIT_ARGS[@]}" --silent
-echo "6. CHANGELOG.md auto-updated from PR metadata"
-
-# 7. Merge (squash, delete remote branch — no branch protection on preview)
-echo ""
-echo "Merging PR #$PR_NUMBER..."
-gh pr merge "$PR_NUMBER" --repo "$REPO" --squash --delete-branch
+echo "7. CHANGELOG.md auto-updated on $BASE_BRANCH"
 
 # 8. Clean up worktree (if one exists for this PR branch)
 WORKTREE_PATH=$(git worktree list --porcelain \
