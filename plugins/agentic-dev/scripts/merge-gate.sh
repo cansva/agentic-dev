@@ -20,17 +20,18 @@ echo "PR: #$PR_NUMBER  Repo: $REPO"
 
 # Fetch all PR metadata in a single API call
 PR_DATA=$(gh pr view "$PR_NUMBER" --repo "$REPO" \
-  --json headRefName,mergeable,body,title)
+  --json headRefName,baseRefName,mergeable,body,title)
 BRANCH=$(echo "$PR_DATA" | jq -r '.headRefName')
+BASE_BRANCH=$(echo "$PR_DATA" | jq -r '.baseRefName')
 PR_TITLE=$(echo "$PR_DATA" | jq -r '.title')
 PR_BODY_RAW=$(echo "$PR_DATA" | jq -r '.body')
 MERGEABLE=$(echo "$PR_DATA" | jq -r '.mergeable')
+SAFE_TITLE=$(echo "$PR_TITLE" | sed 's/<[^>]*>//g')
 
 # Determine if full E2E is needed based on which files the PR touches.
 # Set AGENTIC_DEV_E2E_PATHS to a grep -E regex matching E2E-sensitive paths
 # in your project. Defaults to common patterns.
 E2E_PATHS="$AGENTIC_DEV_E2E_PATHS"
-BASE_BRANCH=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json baseRefName --jq '.baseRefName')
 CHANGED_FILES=$(git diff --name-only "origin/$BASE_BRANCH"...HEAD 2>/dev/null || true)
 E2E_REQUIRED="false"
 if echo "$CHANGED_FILES" | grep -qE "$E2E_PATHS"; then
@@ -137,7 +138,7 @@ resolve_mergeability() {
   # Retry UNKNOWN up to 3 times
   if [ "$status" = "UNKNOWN" ]; then
     for i in 1 2 3; do
-      echo "   Mergeability UNKNOWN — retry $i/3 (waiting 5s)..."
+      echo "   Mergeability UNKNOWN — retry $i/3 (waiting 5s)..." >&2
       sleep 5
       status=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json mergeable --jq '.mergeable')
       [ "$status" != "UNKNOWN" ] && break
@@ -145,11 +146,11 @@ resolve_mergeability() {
   fi
   # Attempt rebase if conflicting
   if [ "$status" = "CONFLICTING" ]; then
-    echo "   PR has conflicts — attempting automatic rebase..."
+    echo "   PR has conflicts — attempting automatic rebase..." >&2
     git fetch origin "$BASE_BRANCH" 2>/dev/null || true
     if git rebase "origin/$BASE_BRANCH" 2>/dev/null; then
       git push --force-with-lease 2>/dev/null || true
-      echo "   Rebase succeeded — waiting for GitHub to recompute mergeability..."
+      echo "   Rebase succeeded — waiting for GitHub to recompute mergeability..." >&2
       sleep 5
       status=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json mergeable --jq '.mergeable')
       # One more retry if still UNKNOWN after rebase push
@@ -159,7 +160,7 @@ resolve_mergeability() {
       fi
     else
       git rebase --abort 2>/dev/null || true
-      echo "   Automatic rebase failed (real conflicts). Manual resolution required."
+      echo "   Automatic rebase failed (real conflicts). Manual resolution required." >&2
     fi
   fi
   echo "$status"
@@ -222,13 +223,11 @@ CHANGELOG_BULLETS=$(echo "$PR_BODY_RAW" \
   | sed -E 's/\[([^]]*)\]\([^)]*\)/\1/g' \
   || true)
 if [ -z "$CHANGELOG_BULLETS" ]; then
-  # Sanitize the fallback title too
-  SAFE_TITLE=$(echo "$PR_TITLE" | sed 's/<[^>]*>//g')
   CHANGELOG_BULLETS="- Changed: $SAFE_TITLE"
 fi
 
-CHANGELOG_ENTRY=$(printf "## %s — %s\n%s" "$TODAY" "$PR_TITLE" "$CHANGELOG_BULLETS")
-CHANGELOG_PATH="docs/CHANGELOG.md"
+CHANGELOG_ENTRY=$(printf "## %s — %s\n%s" "$TODAY" "$SAFE_TITLE" "$CHANGELOG_BULLETS")
+CHANGELOG_PATH="$AGENTIC_DEV_CHANGELOG_PATH"
 
 # Get current file content and SHA from the base branch (post-merge)
 EXISTING=$(gh api "repos/$REPO/contents/$CHANGELOG_PATH?ref=$BASE_BRANCH" \
@@ -252,7 +251,7 @@ COMMIT_ARGS=(-X PUT \
 [ -n "$FILE_SHA" ] && COMMIT_ARGS+=(-f sha="$FILE_SHA")
 
 gh api "repos/$REPO/contents/$CHANGELOG_PATH" "${COMMIT_ARGS[@]}" --silent
-echo "7. CHANGELOG.md auto-updated on $BASE_BRANCH"
+echo "7. $CHANGELOG_PATH auto-updated on $BASE_BRANCH"
 
 # 8. Clean up worktree (if one exists for this PR branch)
 WORKTREE_PATH=$(git worktree list --porcelain \

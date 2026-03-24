@@ -191,6 +191,7 @@ echo "  Build command:   $AGENTIC_DEV_BUILD_CMD"
 echo "  Install command: $AGENTIC_DEV_INSTALL_CMD"
 echo "  Dev command:     $AGENTIC_DEV_DEV_CMD"
 echo "  E2E command:     $AGENTIC_DEV_E2E_CMD"
+echo "  CHANGELOG path:  $AGENTIC_DEV_CHANGELOG_PATH"
 echo "  CI workflow:     ${AGENTIC_DEV_CI_WORKFLOW:-<auto-discover>}"
 echo "  CI paths:        $AGENTIC_DEV_CI_PATHS"
 echo "  E2E paths:       $AGENTIC_DEV_E2E_PATHS"
@@ -203,7 +204,7 @@ echo "=== Results: $PASS passed, $FAIL failed, $WARN warnings ==="
 
 if [ "$FAIL" -gt 0 ]; then
   echo ""
-  echo "Fix the failures above before using /dev."
+  echo "Fix the failures above before using the workflow."
   exit 1
 fi
 
@@ -213,4 +214,4 @@ if [ "$WARN" -gt 0 ]; then
 fi
 
 echo ""
-echo "Ready to use /dev!"
+echo "Ready to use the orchestrator workflow!"

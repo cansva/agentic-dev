@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 #
-# Prune stale worktrees and local branches left over from previous /dev sessions.
+# Prune stale worktrees and local branches left over from previous workflow sessions.
 # Safe: skips branches with unpushed commits, open PRs, or uncommitted worktree changes.
-# Called automatically at the start of each /dev session.
+# Called automatically at the start of each orchestrator session.
 #
 # Usage: ./scripts/cleanup-branches.sh [--local-only]
 #
@@ -27,7 +27,11 @@ PROTECTED="$AGENTIC_DEV_PROTECTED_BRANCHES"
 echo "=== Branch & Worktree Cleanup ==="
 
 # 1. Prune remote tracking refs that no longer exist
-git fetch --prune --quiet
+if [ "$LOCAL_ONLY" = true ]; then
+  echo "  Local-only mode — skipping remote refresh for faster startup"
+else
+  git fetch --prune --quiet
+fi
 
 # 2. Remove worktrees that point to missing directories or broken refs
 git worktree prune
@@ -56,9 +60,24 @@ for wt in $(git worktree list --porcelain | grep '^worktree ' | sed 's/^worktree
   fi
 done
 
-# Pre-fetch all open and merged PRs in batch (avoids per-branch API calls)
-ALL_OPEN_PRS=$(gh pr list --state open --json headRefName,number -L 200 2>/dev/null || echo '[]')
-ALL_MERGED_PRS=$(gh pr list --state merged --json headRefName,number -L 200 2>/dev/null || echo '[]')
+ALL_OPEN_PRS='[]'
+ALL_MERGED_PRS='[]'
+OPEN_PRS_LOADED=0
+MERGED_PRS_LOADED=0
+
+load_open_prs() {
+  if [ "$OPEN_PRS_LOADED" -eq 0 ]; then
+    ALL_OPEN_PRS=$(gh pr list --state open --json headRefName,number -L 200 2>/dev/null || echo '[]')
+    OPEN_PRS_LOADED=1
+  fi
+}
+
+load_merged_prs() {
+  if [ "$MERGED_PRS_LOADED" -eq 0 ]; then
+    ALL_MERGED_PRS=$(gh pr list --state merged --json headRefName,number -L 200 2>/dev/null || echo '[]')
+    MERGED_PRS_LOADED=1
+  fi
+}
 
 # 4. Delete local branches whose remote is gone and have no unpushed commits
 for branch in $(git branch --format='%(refname:short)' | grep -vE "^($PROTECTED)$"); do
@@ -93,7 +112,12 @@ for branch in $(git branch --format='%(refname:short)' | grep -vE "^($PROTECTED)
         git branch -D "$branch" 2>/dev/null || true
       else
         # Squash-merges create new SHAs, so git can't tell commits were merged.
-        # Fall back to checking pre-fetched merged PR data.
+        # Fall back to checking merged PR data when full cleanup is allowed.
+        if [ "$LOCAL_ONLY" = true ]; then
+          echo "  Skipping branch: $branch (local-only cleanup skips GitHub PR lookup)"
+          continue
+        fi
+        load_merged_prs
         merged_pr=$(echo "$ALL_MERGED_PRS" | jq -r --arg b "$branch" '.[] | select(.headRefName == $b) | .number' 2>/dev/null | head -1 || true)
         if [ -n "$merged_pr" ]; then
           echo "  Deleting branch: $branch (PR #$merged_pr squash-merged)"
@@ -111,6 +135,8 @@ done
 if [ "$LOCAL_ONLY" = true ]; then
   echo "  Skipping remote branch cleanup (--local-only)"
 else
+  load_open_prs
+  load_merged_prs
   for remote_branch in $(git branch -r --format='%(refname:short)' | grep -v HEAD | sed 's|^origin/||' | grep -vE "^($PROTECTED)$"); do
     # Check pre-fetched batch data instead of per-branch API calls
     has_open=$(echo "$ALL_OPEN_PRS" | jq --arg b "$remote_branch" '[.[] | select(.headRefName == $b)] | length' 2>/dev/null || echo "1")

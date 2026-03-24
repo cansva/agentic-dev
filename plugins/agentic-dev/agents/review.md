@@ -1,6 +1,6 @@
 ---
 name: review
-description: "Runs CI monitoring and independent Codex review gate for PRs. Handles re-review loops, rebase checks, and merge gate. Use when a PR is ready for review, CI needs monitoring, or Codex review needs to run."
+description: "Runs CI monitoring and independent Codex review gate for PRs. Handles re-review loops and merge gate. Use when a PR is ready for review, CI needs monitoring, or Codex review needs to run."
 tools: Read, Grep, Glob, Bash
 ---
 
@@ -95,7 +95,7 @@ Both CI green **and** `VERDICT: approved` are required to proceed.
 
 | CI | Codex | Action |
 |----|-------|--------|
-| green | approved | Proceed to rebase check |
+| green | approved | Proceed to merge gate |
 | green | blocked | Return findings to orchestrator for fix |
 | failed | approved | Return CI failure to orchestrator for fix |
 | failed | blocked | Return both to orchestrator for fix |
@@ -125,31 +125,6 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/codex-re-review.sh" $PR_NUMBER $CODEX_SESSIO
 ```
 
 Same verdict rules apply. Loop until approved or max rounds reached.
-
----
-
-## Rebase check
-
-Before merge gate, check if rebase is needed:
-
-```bash
-REVIEWED_SHA=$(git rev-parse HEAD)
-git fetch origin "$AGENTIC_DEV_BASE_BRANCH"
-git rebase "origin/$AGENTIC_DEV_BASE_BRANCH"
-DIFF=$(git diff "$REVIEWED_SHA" HEAD)
-```
-
-If the rebase changed HEAD, push the result so the PR is up to date:
-```bash
-if [ -n "$DIFF" ]; then
-  git push --force-with-lease
-fi
-```
-
-| Diff result | Action |
-|-------------|--------|
-| Empty | Rebase was a no-op — skip re-review, proceed to merge gate |
-| Non-empty | Push with `--force-with-lease`, then restart CI + re-review |
 
 ---
 
