@@ -51,6 +51,35 @@ AGENTIC_DEV_CI_PATHS="${AGENTIC_DEV_CI_PATHS:-src/ app/ e2e/ package.json tsconf
 AGENTIC_DEV_E2E_PATHS="${AGENTIC_DEV_E2E_PATHS:-$(_cfg e2ePaths)}"
 AGENTIC_DEV_E2E_PATHS="${AGENTIC_DEV_E2E_PATHS:-^(app/api/|app/lib/|src/api/|src/lib/|e2e/|tests/e2e/)}"
 
+# ── Review configuration ─────────────────────────────────────────────────
+AGENTIC_DEV_MAX_REVIEW_ROUNDS="${AGENTIC_DEV_MAX_REVIEW_ROUNDS:-$(_cfg maxReviewRounds)}"
+AGENTIC_DEV_MAX_REVIEW_ROUNDS="${AGENTIC_DEV_MAX_REVIEW_ROUNDS:-3}"
+
+# ── CI workflow discovery ────────────────────────────────────────────────
+# Unified helper used by both merge-gate.sh and ci-watch.sh.
+# Returns the resolved workflow name (or empty if none found).
+# Usage: WORKFLOW=$(agentic_dev_discover_ci_workflow <branch> <repo>)
+agentic_dev_discover_ci_workflow() {
+  local branch="$1" repo="$2"
+  # 1. Explicit override
+  if [ -n "${AGENTIC_DEV_CI_WORKFLOW}" ]; then
+    echo "$AGENTIC_DEV_CI_WORKFLOW"
+    return
+  fi
+  # 2. Most recent run on this branch
+  local wf
+  wf=$(gh run list --branch "$branch" --repo "$repo" -L 1 \
+    --json workflowName --jq '.[0].workflowName // empty' 2>/dev/null || true)
+  if [ -n "$wf" ]; then
+    echo "$wf"
+    return
+  fi
+  # 3. First workflow defined in the repo
+  wf=$(gh api "repos/$repo/actions/workflows" \
+    --jq '.workflows[0].name // empty' 2>/dev/null || true)
+  echo "$wf"
+}
+
 # ── Optional integrations ──────────────────────────────────────────────────
 AGENTIC_DEV_ADR_PATH="${AGENTIC_DEV_ADR_PATH:-$(_cfg adrPath)}"
 AGENTIC_DEV_ADR_PATH="${AGENTIC_DEV_ADR_PATH:-}"

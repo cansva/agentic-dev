@@ -13,9 +13,20 @@ set -euo pipefail
 #
 # Usage:  scripts/codex-re-review.sh <PR_NUMBER> <CODEX_SESSION_ID> <ROUND>
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+source "$SCRIPT_DIR/config.sh"
+
 PR_NUMBER="${1:?Usage: codex-re-review.sh <PR_NUMBER> <CODEX_SESSION_ID> <ROUND>}"
 CODEX_SESSION_ID="${2:?Missing CODEX_SESSION_ID}"
 ROUND="${3:?Missing round number}"
+
+# Hard guard: reject rounds above the configured maximum
+MAX_ROUNDS="$AGENTIC_DEV_MAX_REVIEW_ROUNDS"
+if [ "$ROUND" -gt "$MAX_ROUNDS" ] 2>/dev/null; then
+  echo "ERROR: Round $ROUND exceeds maximum ($MAX_ROUNDS). Escalate to user."
+  exit 1
+fi
+
 REPO=$(gh repo view --json nameWithOwner --jq '.nameWithOwner')
 
 # Verify we're on the PR branch
