@@ -101,10 +101,22 @@ CODEX_FAILED=0
 if [ "$CODEX_SESSION_ID" != "none" ] && [ -n "$CODEX_SESSION_ID" ]; then
   $CODEX_CMD exec resume "$CODEX_SESSION_ID" -o "$REVIEW_OUTPUT" "$(cat "$PROMPT_FILE")" 2>&1 | tee "$CODEX_LOG" || CODEX_FAILED=$?
 else
-  echo "WARNING: No session ID — running fresh codex exec (no memory of prior findings)"
-  # Prepend context note so Codex knows to rely on PR comments for prior review
+  echo "WARNING: No session ID — running fresh codex exec with reduced confidence"
+  # Prepend context note so Codex knows to rely on PR comments for prior review.
+  # Mark as reduced-confidence so the verdict can be weighted accordingly.
   NOTE_FILE=$(mktemp)
-  echo "NOTE: This is a fresh session (no memory of prior rounds). Read PR comments carefully for your previous review findings before evaluating." > "$NOTE_FILE"
+  cat > "$NOTE_FILE" <<'FALLBACK_NOTE'
+NOTE: This is a fresh session — the original review session could not be resumed
+(session expired or ID unavailable). You have NO memory of prior rounds.
+
+IMPORTANT: Read ALL PR comments carefully to reconstruct prior review findings.
+Your confidence in "RESOLVED" assessments may be lower since you cannot compare
+against your original context. If uncertain whether a fix fully addresses a
+finding, mark it as STILL OPEN with a note explaining the uncertainty.
+
+Add this line at the top of your output:
+⚠️ REDUCED CONFIDENCE — fresh session fallback (no prior context)
+FALLBACK_NOTE
   cat "$PROMPT_FILE" >> "$NOTE_FILE"
   mv "$NOTE_FILE" "$PROMPT_FILE"
   $CODEX_CMD exec -s read-only -o "$REVIEW_OUTPUT" "$(cat "$PROMPT_FILE")" 2>&1 | tee "$CODEX_LOG" || CODEX_FAILED=$?
@@ -139,6 +151,13 @@ fi
 REVIEW_MARKER="<!-- agentic-dev:codex-review:v1 -->"
 REVIEW_BODY="${REVIEW_MARKER}
 ${REVIEW_BODY}"
+
+# Delete previous agentic-dev review comments to avoid noise accumulation
+PREV_COMMENT_IDS=$(gh api "repos/$REPO/issues/$PR_NUMBER/comments" \
+  --jq '[.[] | select(.body | test("<!-- agentic-dev:codex-review:v1 -->")) | .id] | .[]' 2>/dev/null || true)
+for cid in $PREV_COMMENT_IDS; do
+  gh api -X DELETE "repos/$REPO/issues/comments/$cid" --silent 2>/dev/null || true
+done
 
 # Post review as PR comment (file-based to avoid shell argument limits)
 printf '%s' "$REVIEW_BODY" > "$COMMENT_FILE"

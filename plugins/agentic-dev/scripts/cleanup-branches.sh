@@ -56,6 +56,10 @@ for wt in $(git worktree list --porcelain | grep '^worktree ' | sed 's/^worktree
   fi
 done
 
+# Pre-fetch all open and merged PRs in batch (avoids per-branch API calls)
+ALL_OPEN_PRS=$(gh pr list --state open --json headRefName,number -L 200 2>/dev/null || echo '[]')
+ALL_MERGED_PRS=$(gh pr list --state merged --json headRefName,number -L 200 2>/dev/null || echo '[]')
+
 # 4. Delete local branches whose remote is gone and have no unpushed commits
 for branch in $(git branch --format='%(refname:short)' | grep -vE "^($PROTECTED)$"); do
   # Skip if branch is currently checked out in any worktree
@@ -89,8 +93,8 @@ for branch in $(git branch --format='%(refname:short)' | grep -vE "^($PROTECTED)
         git branch -D "$branch" 2>/dev/null || true
       else
         # Squash-merges create new SHAs, so git can't tell commits were merged.
-        # Fall back to checking if a PR for this branch was merged on GitHub.
-        merged_pr=$(gh pr list --head "$branch" --state merged --json number --jq '.[0].number' 2>/dev/null || true)
+        # Fall back to checking pre-fetched merged PR data.
+        merged_pr=$(echo "$ALL_MERGED_PRS" | jq -r --arg b "$branch" '.[] | select(.headRefName == $b) | .number' 2>/dev/null | head -1 || true)
         if [ -n "$merged_pr" ]; then
           echo "  Deleting branch: $branch (PR #$merged_pr squash-merged)"
           git branch -D "$branch" 2>/dev/null || true
@@ -108,12 +112,11 @@ if [ "$LOCAL_ONLY" = true ]; then
   echo "  Skipping remote branch cleanup (--local-only)"
 else
   for remote_branch in $(git branch -r --format='%(refname:short)' | grep -v HEAD | sed 's|^origin/||' | grep -vE "^($PROTECTED)$"); do
-    # Check if there's an open PR for this branch
-    open_pr=$(gh pr list --head "$remote_branch" --state open --json number --jq 'length' 2>/dev/null || echo "1")
-    if [ "$open_pr" = "0" ]; then
-      # No open PR — check if merged
-      merged_pr=$(gh pr list --head "$remote_branch" --state merged --json number --jq 'length' 2>/dev/null || echo "0")
-      if [ "$merged_pr" != "0" ]; then
+    # Check pre-fetched batch data instead of per-branch API calls
+    has_open=$(echo "$ALL_OPEN_PRS" | jq --arg b "$remote_branch" '[.[] | select(.headRefName == $b)] | length' 2>/dev/null || echo "1")
+    if [ "$has_open" = "0" ]; then
+      has_merged=$(echo "$ALL_MERGED_PRS" | jq --arg b "$remote_branch" '[.[] | select(.headRefName == $b)] | length' 2>/dev/null || echo "0")
+      if [ "$has_merged" != "0" ]; then
         echo "  Deleting remote branch: origin/$remote_branch (PR merged)"
         git push origin --delete "$remote_branch" 2>/dev/null || true
       else

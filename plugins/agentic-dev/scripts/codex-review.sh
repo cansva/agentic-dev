@@ -158,6 +158,13 @@ REVIEW_MARKER="<!-- agentic-dev:codex-review:v1 -->"
 REVIEW_BODY="${REVIEW_MARKER}
 ${REVIEW_BODY}"
 
+# Delete previous agentic-dev review comments to avoid noise accumulation
+PREV_COMMENT_IDS=$(gh api "repos/$REPO/issues/$PR_NUMBER/comments" \
+  --jq '[.[] | select(.body | test("<!-- agentic-dev:codex-review:v1 -->")) | .id] | .[]' 2>/dev/null || true)
+for cid in $PREV_COMMENT_IDS; do
+  gh api -X DELETE "repos/$REPO/issues/comments/$cid" --silent 2>/dev/null || true
+done
+
 # Post review as PR comment (file-based to avoid shell argument limits)
 printf '%s' "$REVIEW_BODY" > "$COMMENT_FILE"
 gh pr comment "$PR_NUMBER" --body-file "$COMMENT_FILE"
