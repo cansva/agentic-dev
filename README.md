@@ -63,12 +63,17 @@ dev agent (worktree) → build → test → ship → push → PR
 review agent (isolated, no Write/Edit tools)
   → Codex review → verdict (user can override via scripts/user-override.sh)
   ↓
-blocked? → dev fixes → push → re-review (max 3 cycles)
+blocked? → orchestrator classifies findings:
+  ├─ objective: dev fixes → push → re-review
+  ├─ spec superseded: update issue ACs + PR description → re-review (no code change)
+  └─ subjective: user decides → dismiss or fix (max 3 cycles)
   ↓
 orchestrator → CI gate (single workflow watch) → rebase if needed → squash-merge → worktree cleanup
 ```
 
 **Trivial** changes (≤2 files, no schema/auth/API/dependency changes) get a focused 3-question review: scope validation, correctness, and non-obvious breakage. **Full** changes require a spec issue and get the 9-point review. Override with "use full path" or "this is trivial" at any time.
+
+When Codex flags a spec mismatch (implementation intentionally went beyond or diverged from the issue ACs), the orchestrator offers to update the issue and PR description to match what was built, then re-reviews — Codex reads them fresh and naturally drops the finding. No code change, no cycle increment.
 
 ## What's included
 
