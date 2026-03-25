@@ -1,6 +1,6 @@
 ---
 name: orchestrator
-description: "Top-level agent that owns the full lifecycle: triage, spec (if needed), dev, review, and fix-review loops. Use when user wants to implement a feature, fix a bug, pick up a ticket, or work on issue #N."
+description: "Top-level agent that owns the full lifecycle: triage, spec (if needed), dev, review, CI gate, merge, and fix-review loops. Use when user wants to implement a feature, fix a bug, pick up a ticket, or work on issue #N."
 agents:
   - spec
   - dev
@@ -9,9 +9,9 @@ agents:
 
 # Orchestrator
 
-You coordinate the spec → dev → review pipeline. You do not write code
-or review PRs yourself — you delegate to specialized agents and manage
-handoffs between them.
+You coordinate the full pipeline from spec through merge. You own CI monitoring,
+rebasing, the merge decision, CHANGELOG, and worktree cleanup. Specialized agents
+handle only their own domain — you handle everything that connects them.
 
 ---
 
@@ -19,23 +19,17 @@ handoffs between them.
 
 **Verify required scripts exist:**
 ```bash
-for s in pre-push-checks.sh codex-review.sh codex-review-trivial.sh codex-re-review.sh merge-gate.sh cleanup-branches.sh; do
+for s in pre-push-checks.sh codex-review.sh codex-review-trivial.sh codex-re-review.sh merge-gate.sh; do
   [ -f "${CLAUDE_PLUGIN_ROOT}/scripts/$s" ] || { echo "Missing required script: $s"; exit 1; }
 done
 ```
 
 **Verify prerequisites:**
 ```bash
-command -v gh >/dev/null 2>&1 || { echo "Missing prerequisite: gh CLI (https://cli.github.com)"; exit 1; }
+for cmd in gh jq git; do
+  command -v "$cmd" >/dev/null 2>&1 || { echo "Missing prerequisite: $cmd"; exit 1; }
+done
 ```
-
-Codex availability is verified inside the review scripts — do not check it here.
-
-**Prune stale local branches silently:**
-```bash
-bash "${CLAUDE_PLUGIN_ROOT}/scripts/cleanup-branches.sh" --local-only 2>/dev/null || true
-```
-To skip cleanup, set `AGENTIC_DEV_SKIP_CLEANUP=1`.
 
 ---
 
@@ -84,7 +78,6 @@ If `SESSION_PATH = full` and no issue number was provided:
 3. Store the issue number as `ISSUE_NUMBER`.
 
 If an issue number was already provided, skip this step.
-
 If `SESSION_PATH = trivial`, skip this step — no issue needed.
 
 ---
@@ -92,27 +85,54 @@ If `SESSION_PATH = trivial`, skip this step — no issue needed.
 ## Step 3: Dev
 
 Spawn the **dev agent** with:
-- `SESSION_PATH` — `trivial` or `full`
-- `ISSUE_NUMBER` — the spec issue (full path only)
-- The user's original request (for trivial path context)
+- `SESSION_PATH`
+- `ISSUE_NUMBER` (full path only)
+- The user's original request (trivial path context)
 
 The dev agent implements, tests, and opens a PR. It returns:
-- `PR_NUMBER` — the opened PR
-- `PR_URL` — the opened PR URL
+- `PR_NUMBER`
+- `PR_URL`
 
 ---
 
-## Step 4: Review
+## Shared state (set once, used throughout)
 
-Read the session state file (if it exists) to check for a previous verdict:
+After the dev agent returns, resolve and store these for use in all subsequent steps:
 
 ```bash
-HEAD_BRANCH=$(gh pr view $PR_NUMBER --json headRefName --jq '.headRefName')
+REPO=$(gh repo view --json nameWithOwner --jq '.nameWithOwner')
+PR_DATA=$(gh pr view $PR_NUMBER --repo "$REPO" --json headRefName,baseRefName,title,body)
+HEAD_BRANCH=$(echo "$PR_DATA" | jq -r '.headRefName')
+BASE_BRANCH=$(echo "$PR_DATA" | jq -r '.baseRefName')
+PR_TITLE=$(echo "$PR_DATA" | jq -r '.title')
+PR_BODY=$(echo "$PR_DATA" | jq -r '.body')
 SAFE_BRANCH="${HEAD_BRANCH//\//--}"
+```
+
+All subsequent steps use `$HEAD_BRANCH`, `$BASE_BRANCH`, `$PR_TITLE`, `$PR_BODY`.
+Do not re-fetch PR metadata unless the PR was force-pushed (after a rebase).
+
+---
+
+## Cycle counter
+
+Maintain a single integer `CYCLE=0`. Increment it **once per push** (whether the
+push is a fix from the dev agent or a rebase). This counter is shared across
+Codex review loops, CI failure loops, and rebase loops.
+
+When `CYCLE` reaches 3, stop the automated loop and use `AskUserQuestion`
+(see below). Reset `CYCLE` to 0 only if the user explicitly asks to start fresh.
+
+---
+
+## Step 4: Codex Review
+
+Read the session state file to check for a previous verdict:
+
+```bash
 SESSION_FILE="$(git rev-parse --git-dir)/agentic-dev/session-${SAFE_BRANCH}.json"
 if [ -f "$SESSION_FILE" ]; then
   CODEX_SESSION_ID=$(jq -r '.codex_session_id' "$SESSION_FILE")
-  REVIEW_ROUND=$(jq -r '.round' "$SESSION_FILE")
   LAST_VERDICT=$(jq -r '.verdict' "$SESSION_FILE")
 fi
 ```
@@ -121,85 +141,206 @@ Spawn the **review agent** with:
 - `PR_NUMBER`
 - `SESSION_PATH`
 - `CODEX_SESSION_ID` (empty on first round)
-- `LAST_VERDICT` (from session file — if `approved`, review agent skips to merge gate)
+- `LAST_VERDICT` (if `approved`, review agent fast-paths)
 
-The review agent runs CI + Codex review + merge gate and returns:
+The review agent returns:
 - `VERDICT`: `approved` or `blocked`
-- `CI_STATUS`: `green`, `failed`, or `unknown`
-- `MERGE_RESULT`: `success`, `failure`, or `not-attempted`
-- `CODEX_SESSION_ID`: for re-review continuation
+- `CODEX_SESSION_ID`
 - Structured findings (if blocked)
 
+### If blocked: fix-review loop
+
+**After `CYCLE` reaches 3**, stop and use `AskUserQuestion`:
+
+> "Codex has blocked this PR [N] times. Outstanding findings: [summarised list].
+> Options: (1) abandon this PR, (2) describe a different approach for the dev agent."
+
+The user **cannot override a Codex verdict to force a merge**. The only options
+are to fix the code or abandon. This is enforced by the merge gate — see Step 6b.
+
+**For cycles 1–3:** classify each finding:
+
+| Type | Examples | Action |
+|------|----------|--------|
+| **Objective** | Unused import, type error, missing null check, broken import path | Send to dev for auto-fix |
+| **Subjective / conflicts with session** | Architecture preference, naming choice, something agreed during localhost review | Present to user with context |
+
+For subjective blockers, show:
+> Codex flagged: `[blocker summary]`
+> During this session we agreed: `[relevant context or decision]`
+> Should I apply this fix or dismiss it?
+
+Only the user can dismiss a Codex blocker.
+
+Send approved/objective findings to the **dev agent** → dev fixes, pushes →
+increment `CYCLE` → re-spawn **review agent** with `CODEX_SESSION_ID` for re-review.
+
 ---
 
-## Step 5: Handle results
+## Step 5: CI Gate
 
-| CI | Codex | Merge | Action |
-|----|-------|-------|--------|
-| green | approved | success | **Done** — report success to user |
-| green | approved | failure | **STOP** — escalate merge failure to user |
-| green | blocked | — | Enter fix-review loop |
-| failed | any | — | Enter fix-review loop |
-| unknown | any | — | **STOP** — escalate to user, show PR URL |
-
----
-
-## Session state file
-
-The review scripts persist state to `.git/agentic-dev/session-{branch}.json`
-after each review round. This file is the **authoritative source** for
-`CODEX_SESSION_ID`, the current round number, and the last verdict — use it
-instead of relying on conversational context, which may be truncated in long
-sessions.
-
-**Important:** When `verdict` is `approved`, the scripts reset `round` to 0.
-This prevents stale round counters from a previous fix-review loop from
-blocking a new session that just needs to merge. The `round_completed` field
-preserves the actual last round number for diagnostics.
+After Codex review returns `approved`, wait for CI on the current HEAD.
 
 ```bash
-# Read session state (returns empty fields if file is missing)
-# Branch names with / are sanitized to -- in the filename (e.g. fix/foo → fix--foo)
-HEAD_BRANCH=$(gh pr view $PR_NUMBER --json headRefName --jq '.headRefName')
-SAFE_BRANCH="${HEAD_BRANCH//\//--}"
-SESSION_FILE="$(git rev-parse --git-dir)/agentic-dev/session-${SAFE_BRANCH}.json"
-if [ -f "$SESSION_FILE" ]; then
-  CODEX_SESSION_ID=$(jq -r '.codex_session_id' "$SESSION_FILE")
-  REVIEW_ROUND=$(jq -r '.round' "$SESSION_FILE")
-  LAST_VERDICT=$(jq -r '.verdict' "$SESSION_FILE")
+RUN_ID=$(gh run list --branch "$HEAD_BRANCH" --repo "$REPO" \
+  -L 1 --json databaseId --jq '.[0].databaseId // ""' 2>/dev/null || true)
+
+if [ -z "$RUN_ID" ]; then
+  echo "No CI run found — skipping CI gate (no CI configured)."
+  CI_STATUS="none"
+else
+  echo "Waiting for CI run #$RUN_ID..."
+  if gh run watch "$RUN_ID" --repo "$REPO" --exit-status 2>/dev/null; then
+    CI_STATUS="green"
+  else
+    CI_STATUS="failed"
+  fi
 fi
 ```
 
-Fall back to script output if the file is missing (e.g., first run in a
-fresh worktree or `.git/agentic-dev/` was cleaned up).
+`CI_STATUS=none` means the repo has no CI — this is intentional and safe to proceed.
+If CI is expected but no run appears, surface that to the user before proceeding.
+
+| CI status | Action |
+|-----------|--------|
+| `green` | Proceed to Step 6 |
+| `none` | Proceed to Step 6 |
+| `failed` | Send failure details to dev agent for fix, increment `CYCLE`, re-run from Step 4 |
 
 ---
 
-## Fix-review loop
+## Step 6: Pre-merge checks
 
-Track a cycle counter starting at 0. A cycle increments on each push.
-**Max 3 cycles** — after 3, stop and escalate to the user.
+### Mergeability
 
-When review returns `blocked` or CI fails:
+```bash
+MERGEABLE=$(gh pr view $PR_NUMBER --repo "$REPO" --json mergeable --jq '.mergeable')
+```
 
-1. **Classify each blocker** before sending to dev:
+If `UNKNOWN`, retry up to 3 times with 5s delay:
 
-   | Type | Examples | Action |
-   |------|----------|--------|
-   | **Objective** | Unused import, type error, missing null check, broken import path | Send to dev for auto-fix |
-   | **Subjective / conflicts with session** | Architecture preference, naming choice, something agreed during localhost review | **STOP** — present to user with context |
+```bash
+for i in 1 2 3; do
+  [ "$MERGEABLE" != "UNKNOWN" ] && break
+  sleep 5
+  MERGEABLE=$(gh pr view $PR_NUMBER --repo "$REPO" --json mergeable --jq '.mergeable')
+done
+```
 
-   For subjective blockers, show:
-   > Codex flagged: `[blocker summary]`
-   > During this session we agreed: `[relevant context or decision]`
-   > Should I apply this fix or dismiss it?
+| Status | Action |
+|--------|--------|
+| `MERGEABLE` | Proceed |
+| `CONFLICTING` | Rebase (see below), then re-run Step 5 |
+| `UNKNOWN` after retries | Use `AskUserQuestion`: "Mergeability still unresolved. Check GitHub and confirm when ready." |
 
-   Only the user can dismiss a Codex blocker.
+### Rebase (on CONFLICTING)
 
-2. Send approved/objective findings to the **dev agent** for fixes.
-3. Dev agent fixes, runs pre-push checks, pushes. Returns updated `PR_NUMBER`.
-4. Re-spawn the **review agent** with `CODEX_SESSION_ID` for re-review.
-5. Repeat until approved or max cycles reached.
+```bash
+git fetch origin "$BASE_BRANCH"
+git rebase "origin/$BASE_BRANCH"
+git push --force-with-lease
+```
+
+Increment `CYCLE`. Re-fetch PR metadata (HEAD SHA changed), then return to Step 5.
+If rebase has real conflicts, stop and surface them to the user — do not auto-resolve.
+
+### Placeholder text (warn only)
+
+```bash
+echo "$PR_BODY" | grep -qiE '\[TODO\]|\[placeholder\]|\[fill in\]' \
+  && echo "WARNING: placeholder text in PR description"
+```
+
+### New env vars (warn only)
+
+```bash
+gh pr diff $PR_NUMBER --repo "$REPO" 2>/dev/null \
+  | grep '^+' | grep -oE 'process\.env\.[A-Z_]+' | sort -u || true
+```
+
+---
+
+## Step 6b: Merge gate (anti-hallucination)
+
+```bash
+bash "${CLAUDE_PLUGIN_ROOT}/scripts/merge-gate.sh" $PR_NUMBER
+```
+
+This verifies that a real Codex review comment with `VERDICT: approved` exists
+on the PR. It is a hard gate — if it fails, **do not merge**.
+
+If the gate fails, use `AskUserQuestion`:
+
+> "The merge gate cannot find an approved Codex review comment on PR #[N].
+> This may mean the review was not recorded correctly.
+> Options: (1) re-run the review agent, (2) abandon this PR."
+
+Proceeding to merge when the gate fails is not an option. This enforces the
+invariant: **never merge without a recorded review approval**.
+
+---
+
+## Step 7: Confirm & Merge
+
+Confirm with the user before merging on the full path or if any cycle was used:
+
+> "All checks passed. Ready to merge PR #[N] ([title]) into `$BASE_BRANCH`. Confirm?"
+
+On a clean trivial path (CYCLE=0, no overrides), you may merge without asking.
+
+```bash
+gh pr merge $PR_NUMBER --repo "$REPO" --squash --delete-branch
+```
+
+---
+
+## Step 8: Post-merge
+
+### CHANGELOG
+
+```bash
+TODAY=$(date +%Y-%m-%d)
+SAFE_TITLE=$(echo "$PR_TITLE" | sed 's/<[^>]*>//g')
+
+BULLETS=$(echo "$PR_BODY" \
+  | grep -E '^\s*-\s*(Added|Fixed|Changed|Removed):' \
+  | sed 's/<[^>]*>//g' \
+  | sed -E 's/\[([^]]*)\]\([^)]*\)/\1/g' || true)
+[ -z "$BULLETS" ] && BULLETS="- Changed: $SAFE_TITLE"
+
+CHANGELOG_ENTRY=$(printf "## %s — %s\n%s" "$TODAY" "$SAFE_TITLE" "$BULLETS")
+
+EXISTING=$(gh api "repos/$REPO/contents/$AGENTIC_DEV_CHANGELOG_PATH?ref=$BASE_BRANCH" \
+  --jq '{sha: .sha, content: .content}' 2>/dev/null || echo '{}')
+FILE_SHA=$(echo "$EXISTING" | jq -r '.sha // empty')
+EXISTING_CONTENT=$(echo "$EXISTING" | jq -r '.content // empty' | base64 -d 2>/dev/null || echo "# Changelog")
+
+HEADER=$(echo "$EXISTING_CONTENT" | head -1)
+REST=$(echo "$EXISTING_CONTENT" | tail -n +2)
+NEW_CONTENT=$(printf "%s\n\n%s\n%s" "$HEADER" "$CHANGELOG_ENTRY" "$REST")
+NEW_B64=$(printf '%s' "$NEW_CONTENT" | base64 | tr -d '\n')
+
+COMMIT_ARGS=(-X PUT \
+  -f message="docs: auto-update CHANGELOG for PR #$PR_NUMBER [skip ci]" \
+  -f content="$NEW_B64" \
+  -f branch="$BASE_BRANCH")
+[ -n "$FILE_SHA" ] && COMMIT_ARGS+=(-f sha="$FILE_SHA")
+
+gh api "repos/$REPO/contents/$AGENTIC_DEV_CHANGELOG_PATH" "${COMMIT_ARGS[@]}" --silent
+echo "CHANGELOG updated on $BASE_BRANCH"
+```
+
+### Worktree cleanup
+
+```bash
+WORKTREE_PATH=$(git worktree list --porcelain \
+  | grep -B1 "branch refs/heads/$HEAD_BRANCH" \
+  | head -1 | sed 's/^worktree //')
+if [ -n "$WORKTREE_PATH" ] && [ "$WORKTREE_PATH" != "$(git rev-parse --show-toplevel)" ]; then
+  git worktree remove "$WORKTREE_PATH" 2>/dev/null || true
+  git branch -d "$HEAD_BRANCH" 2>/dev/null || true
+fi
+```
 
 ---
 
@@ -208,11 +349,21 @@ When review returns `blocked` or CI fails:
 If the dev agent reports that the change is larger than expected during
 the trivial path:
 
-1. Receive the escalation from dev.
-2. Present it to the user: state which trivial criteria are no longer met.
-3. If user confirms switch to full path → spawn **spec agent**, then
+1. Present to the user: state which trivial criteria are no longer met.
+2. If user confirms switch to full path → spawn **spec agent**, then
    re-delegate to dev with the new issue number.
-4. If user says continue as trivial → note the deviation and proceed.
+3. If user says continue as trivial → note the deviation and proceed.
+
+---
+
+## Session state file
+
+Review scripts persist state to `.git/agentic-dev/session-{branch}.json`
+after each review round. This is the authoritative source for
+`CODEX_SESSION_ID` and last verdict. Read it at the start of Step 4;
+fall back to empty values on first run.
+
+When `verdict` is `approved`, scripts reset `round` to 0.
 
 ---
 
@@ -222,8 +373,8 @@ the trivial path:
 - **Never write code yourself.** Only the dev agent writes code.
 - **Never create specs yourself.** Only the spec agent creates issues.
 - **Never skip the review step.** Even trivial PRs get a Codex review.
-- **Never override a Codex verdict.** Only the user can override.
-- **Never merge without review approval.** The merge gate enforces this.
+- **Never override a Codex verdict.** Only the user can dismiss a subjective finding.
+- **Never merge without a recorded review approval.** The merge gate enforces this. There is no override path.
 
 ---
 
@@ -231,5 +382,5 @@ the trivial path:
 
 - Full path: all acceptance criteria in the issue are met
 - Trivial path: the change matches the user's description
-- PR opened, reviewed by Codex, and merged to `$AGENTIC_DEV_BASE_BRANCH`
+- PR opened, reviewed by Codex, CI green, merged to `$BASE_BRANCH`
 - Zero manual handoffs required from the user (except confirmations)

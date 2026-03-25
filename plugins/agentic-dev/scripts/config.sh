@@ -114,7 +114,7 @@ AGENTIC_DEV_MAX_REVIEW_ROUNDS="${AGENTIC_DEV_MAX_REVIEW_ROUNDS:-$(_cfg maxReview
 AGENTIC_DEV_MAX_REVIEW_ROUNDS="${AGENTIC_DEV_MAX_REVIEW_ROUNDS:-3}"
 
 # ── CI workflow discovery ────────────────────────────────────────────────
-# Unified helper used by both merge-gate.sh and ci-watch.sh.
+# Unified CI workflow discovery helper.
 # Returns the resolved workflow name (or empty if none found).
 # Usage: WORKFLOW=$(agentic_dev_discover_ci_workflow <branch> <repo>)
 agentic_dev_discover_ci_workflow() {
