@@ -11,6 +11,13 @@
 # PreToolUse hook — receives JSON on stdin.
 # Exit 0 = allow, exit 2 = block.
 
+# Source shared config so AGENTIC_DEV_BASE_BRANCH is authoritative — without
+# this the base-advance check falls back to the hardcoded "preview" default
+# even when the repo is configured for a different base branch.
+_HOOK_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=../scripts/config.sh
+source "$_HOOK_DIR/../scripts/config.sh" 2>/dev/null || true
+
 # Hard-fail if jq is missing — without it, COMMAND is empty and all checks
 # silently pass. Exit 2 so the agent sees the block immediately.
 if ! command -v jq >/dev/null 2>&1; then

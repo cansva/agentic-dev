@@ -89,15 +89,35 @@ Spawn the **dev agent** with:
 - `ISSUE_NUMBER` (full path only)
 - The user's original request (trivial path context)
 
-The dev agent implements, tests, and opens a PR. It returns:
+The dev agent may return one of two things:
+
+**Normal return** — implementation complete, PR opened:
 - `PR_NUMBER`
 - `PR_URL`
+
+**Localhost review checkpoint** — dev server is running, user verification needed:
+- `LOCALHOST_REVIEW_READY`
+- `url`: the dev server URL
+- `worktree`: the worktree path
+- `changed_files`: list of changed UI files
+
+On `LOCALHOST_REVIEW_READY`:
+1. Present to the user:
+   > "Dev server is running at `<url>` (worktree: `<worktree>`).
+   > Changed files: `<changed_files>`
+   > Please verify the affected areas and reply **ok** when done, or describe what needs to change."
+2. Wait for the user's reply.
+3. Re-invoke the **dev agent** with `LOCALHOST_FEEDBACK=ok` or `LOCALHOST_FEEDBACK=<issue>`.
+4. Repeat until the dev agent returns the normal `PR_NUMBER` / `PR_URL` form.
+
+If `LOCALHOST_FEEDBACK` describes a scope change (alters ACs or goes beyond the
+scope contract), handle it as a mid-implementation escalation before re-invoking dev.
 
 ---
 
 ## Shared state (set once, used throughout)
 
-After the dev agent returns, resolve and store these for use in all subsequent steps:
+After the dev agent returns `PR_NUMBER`, resolve and store these for use in all subsequent steps:
 
 ```bash
 REPO=$(gh repo view --json nameWithOwner --jq '.nameWithOwner')
@@ -260,6 +280,7 @@ fi
 |-----------|--------|
 | `green` | Proceed to Step 6 |
 | `none` | Proceed to Step 6 |
+| `user_confirmed` | Proceed to Step 6 (user has explicitly confirmed CI status) |
 | `failed` | Send failure details to dev agent for fix, increment `CYCLE`, re-run from Step 4 |
 
 ---
@@ -291,12 +312,18 @@ done
 ### Rebase (on CONFLICTING)
 
 ```bash
+SHA_BEFORE=$(gh pr view $PR_NUMBER --repo "$REPO" --json headRefOid --jq '.headRefOid')
 git fetch origin "$BASE_BRANCH"
 git rebase "origin/$BASE_BRANCH"
 git push --force-with-lease
+SHA_AFTER=$(gh pr view $PR_NUMBER --repo "$REPO" --json headRefOid --jq '.headRefOid')
+if [ "$SHA_AFTER" != "$SHA_BEFORE" ]; then
+  CYCLE=$((CYCLE + 1))
+  PR_DATA=$(gh pr view $PR_NUMBER --repo "$REPO" --json headRefName,baseRefName,title,body)
+fi
 ```
 
-Increment `CYCLE`. Re-fetch PR metadata (HEAD SHA changed), then return to Step 5.
+Return to Step 5.
 If rebase has real conflicts, stop and surface them to the user — do not auto-resolve.
 
 ### Placeholder text (warn only)
