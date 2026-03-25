@@ -1,0 +1,4 @@
+.git
+.claude/worktrees
+node_modules
+*.log

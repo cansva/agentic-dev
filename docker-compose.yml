@@ -1,0 +1,22 @@
+services:
+  agentic-dev:
+    build: .
+    image: agentic-dev:latest
+    working_dir: /workspace
+    volumes:
+      - ${PROJECT_DIR:-.}:/workspace          # consumer project
+      - ${HOME}/.gitconfig:/home/node/.gitconfig:ro
+      - ${HOME}/.ssh:/home/node/.ssh:ro            # for git push over SSH
+      - agentic-dev-claude-config:/home/node/.claude  # persist auth + memory across runs
+      - agentic-dev-gh-config:/home/node/.config/gh
+    environment:
+      - ANTHROPIC_API_KEY
+      - OPENAI_API_KEY
+      - GH_TOKEN
+      - AGENTIC_DEV_BASE_BRANCH=${AGENTIC_DEV_BASE_BRANCH:-main}
+    stdin_open: true
+    tty: true
+
+volumes:
+  agentic-dev-claude-config:
+  agentic-dev-gh-config:
