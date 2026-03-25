@@ -9,6 +9,9 @@ set -euo pipefail
 # Usage:  scripts/codex-review.sh <PR_NUMBER>
 # Output: Prints CODEX_SESSION_ID=<id> on the last line (for re-review).
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+source "$SCRIPT_DIR/config.sh"
+
 PR_NUMBER="${1:?Usage: codex-review.sh <PR_NUMBER>}"
 REPO=$(gh repo view --json nameWithOwner --jq '.nameWithOwner')
 
@@ -176,7 +179,8 @@ PROMPT
 # Capture terminal output (contains session ID) separately from -o file (review body)
 echo "Streaming Codex terminal output to: $CODEX_LOG"
 echo "Tip: tail -f \"$CODEX_LOG\" from another terminal to watch live."
-if ! $CODEX_CMD exec -s read-only -o "$REVIEW_OUTPUT" "$(cat "$PROMPT_FILE")" 2>&1 | tee "$CODEX_LOG"; then
+CODEX_SANDBOX_ARGS=$(agentic_dev_codex_sandbox_args)
+if ! $CODEX_CMD exec $CODEX_SANDBOX_ARGS -o "$REVIEW_OUTPUT" "$(cat "$PROMPT_FILE")" 2>&1 | tee "$CODEX_LOG"; then
   echo "ERROR: Codex exec failed (exit code $?)." >&2
   gh pr comment "$PR_NUMBER" --body "<!-- agentic-dev:codex-review:v1 -->
 **Codex review failed** — \`codex exec\` exited non-zero. This is an infrastructure failure, not a review verdict. Re-run \`codex-review.sh\` or check Codex CLI / API key status."

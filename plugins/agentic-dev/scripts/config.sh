@@ -97,6 +97,18 @@ AGENTIC_DEV_E2E_SMOKE_PATHS="${AGENTIC_DEV_E2E_SMOKE_PATHS:-^(app/|src/|pages/|c
 AGENTIC_DEV_E2E_PATHS="${AGENTIC_DEV_E2E_PATHS:-$(_cfg e2ePaths)}"
 AGENTIC_DEV_E2E_PATHS="${AGENTIC_DEV_E2E_PATHS:-}"
 
+# ── Codex sandbox probe ─────────────────────────────────────────────────────
+# Returns the appropriate sandbox flag for the current environment.
+# Uses -s read-only when bwrap is available; falls back to
+# --dangerously-bypass-approvals-and-sandbox in containers where bwrap is absent.
+agentic_dev_codex_sandbox_args() {
+  if codex sandbox linux -- true >/dev/null 2>&1; then
+    echo "-s read-only"
+  else
+    echo "--dangerously-bypass-approvals-and-sandbox"
+  fi
+}
+
 # ── Review configuration ─────────────────────────────────────────────────
 AGENTIC_DEV_MAX_REVIEW_ROUNDS="${AGENTIC_DEV_MAX_REVIEW_ROUNDS:-$(_cfg maxReviewRounds)}"
 AGENTIC_DEV_MAX_REVIEW_ROUNDS="${AGENTIC_DEV_MAX_REVIEW_ROUNDS:-3}"

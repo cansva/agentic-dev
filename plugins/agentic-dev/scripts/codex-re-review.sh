@@ -164,7 +164,8 @@ Add this line at the top of your output:
 FALLBACK_NOTE
   cat "$PROMPT_FILE" >> "$NOTE_FILE"
   mv "$NOTE_FILE" "$PROMPT_FILE"
-  $CODEX_CMD exec -s read-only -o "$REVIEW_OUTPUT" "$(cat "$PROMPT_FILE")" 2>&1 | tee "$CODEX_LOG" || CODEX_FAILED=$?
+  CODEX_SANDBOX_ARGS=$(agentic_dev_codex_sandbox_args)
+  $CODEX_CMD exec $CODEX_SANDBOX_ARGS -o "$REVIEW_OUTPUT" "$(cat "$PROMPT_FILE")" 2>&1 | tee "$CODEX_LOG" || CODEX_FAILED=$?
 fi
 
 if [ "$CODEX_FAILED" -ne 0 ]; then
