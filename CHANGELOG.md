@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.8.0 — 2026-03-31
+
+Remove changelog ownership and E2E scope; fix localhost content detection
+
+### Fixed
+- LOCALHOST_MODE now correctly triggers for content-generating lib files matching `*email*`, `*template*`, `*mailer*`, `*notification*`, `*copy*` patterns regardless of directory (#32)
+- Removed E2E execution references from review agent and config — E2E is out of scope for this plugin (#29)
+
+### Changed
+- Removed post-merge CHANGELOG step entirely — changelog management is a repo-level concern; the plugin no longer owns it (#34)
+
 ## 1.7.1 — 2026-03-25
 
 Bats test suite, merge-gate reliability fixes, and orchestrator improvements.
